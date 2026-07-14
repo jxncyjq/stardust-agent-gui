@@ -1,0 +1,11 @@
+build/bin
+node_modules
+frontend/dist
+
+# build artifacts
+*.exe
+
+# OMC agent state
+.omc/
+CLAUDE.md
+build/
