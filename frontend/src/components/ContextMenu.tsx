@@ -51,7 +51,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
         <button
           key={idx}
           className={
-            'block w-full px-3 py-1 text-left text-xs hover:bg-muted ' +
+            'interactive block w-full px-3 py-1 text-left text-xs hover:bg-muted ' +
             (item.destructive ? 'text-destructive' : 'text-foreground')
           }
           onClick={() => {

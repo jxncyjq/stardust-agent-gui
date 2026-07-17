@@ -241,25 +241,50 @@ func (a *App) GetSessionTurns(sessionID string) ([]map[string]any, error) {
 	return turns, nil
 }
 
+// ListAgents returns the names of the configured sub-agents (the keys of the
+// config's `agents` map) so the chat UI can offer them as conversation targets.
+// The built-in default agent is not in this list — it is selected by submitting
+// a task with agentID "default-agent" (see SubmitTask). Called by React via the
+// Wails bindings.
+func (a *App) ListAgents() ([]string, error) {
+	body, err := a.apiGet("/v1/agents")
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Agents []string `json:"agents"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("decode agents: %w", err)
+	}
+	return result.Agents, nil
+}
+
 // SubmitTask submits a prompt to the embedded service as a task and returns the
 // generated task id. When sessionID is non-empty the task is attached to that
-// session so the backend persists the conversation turns. images carries
-// optional multimodal inputs as data-URI strings ("data:image/...;base64,...");
-// it may be nil or empty for a text-only task, in which case the backend
-// behaves exactly as before. The call goes through the Go side to avoid browser
-// CORS preflight against the random-port local service, and uses the field names
-// the backend createTaskRequest expects
-// (id/input/agent_id/company_id/session_id/images).
-func (a *App) SubmitTask(prompt string, sessionID string, images []string) (string, error) {
+// session so the backend persists the conversation turns. agentID selects which
+// agent handles the task: a configured sub-agent name (from ListAgents) routes
+// to that agent's model/persona/tools, and an empty string falls back to the
+// built-in "default-agent" so existing callers keep their behaviour. images
+// carries optional multimodal inputs as data-URI strings
+// ("data:image/...;base64,..."); it may be nil or empty for a text-only task.
+// The call goes through the Go side to avoid browser CORS preflight against the
+// random-port local service, and uses the field names the backend
+// createTaskRequest expects (id/input/agent_id/company_id/session_id/images).
+func (a *App) SubmitTask(prompt string, sessionID string, images []string, agentID string) (string, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return "", fmt.Errorf("prompt is required")
+	}
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		agentID = "default-agent"
 	}
 	taskID := fmt.Sprintf("gui-task-%d", time.Now().UTC().UnixNano())
 	payload, err := json.Marshal(map[string]any{
 		"id":         taskID,
 		"input":      prompt,
-		"agent_id":   "default-agent",
+		"agent_id":   agentID,
 		"company_id": "default-company",
 		"session_id": strings.TrimSpace(sessionID),
 		"images":     images,

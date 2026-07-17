@@ -23,11 +23,13 @@ export function StatusPanel() {
         {tabs.map((tab) => (
           <button
             key={tab.id}
+            role="tab"
+            aria-selected={activeTab === tab.id}
             className={cn(
-              'flex-1 py-2 text-xs font-medium',
+              'interactive flex-1 py-2 text-xs font-medium',
               activeTab === tab.id
                 ? 'text-foreground border-b-2 border-primary'
-                : 'text-muted-foreground hover:text-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             )}
             onClick={() => setActiveTab(tab.id)}
           >

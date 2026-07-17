@@ -1,3 +1,5 @@
+import { PlusIcon } from '../../icons'
+
 interface Profile {
   model?: string
   base_url?: string
@@ -37,7 +39,7 @@ export function ProfilesEditor({
         <div key={name} className="border border-border rounded p-2 flex flex-col gap-1">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold">{name}</span>
-            <button type="button" className="text-xs px-2 rounded hover:bg-muted text-muted-foreground" onClick={() => remove(name)}>
+            <button type="button" className="interactive text-xs px-2 py-0.5 rounded hover:bg-muted text-muted-foreground hover:text-destructive" onClick={() => remove(name)}>
               删除
             </button>
           </div>
@@ -54,8 +56,13 @@ export function ProfilesEditor({
           ))}
         </div>
       ))}
-      <button type="button" className="text-xs px-2 py-1 rounded border border-input hover:bg-muted text-left" onClick={add}>
-        + 添加 profile
+      <button
+        type="button"
+        className="interactive flex items-center gap-1 text-xs px-2 py-1 rounded border border-input hover:bg-muted text-left"
+        onClick={add}
+      >
+        <PlusIcon className="w-3.5 h-3.5" />
+        <span>添加 profile</span>
       </button>
     </div>
   )

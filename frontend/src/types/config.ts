@@ -6,6 +6,7 @@ export type FieldWidget =
   | 'secret'
   | 'color'
   | 'profiles'
+  | 'agents'
   | 'stringlist'
   | 'readonly'
 
@@ -52,6 +53,15 @@ export const CONFIG_SECTIONS: SectionSpec[] = [
       { path: 'maas.api_key', label: 'api_key', widget: 'secret' },
       { path: 'maas.default_profile', label: 'default_profile', widget: 'text' },
       { path: 'maas.profiles', label: 'profiles', widget: 'profiles' },
+    ],
+  },
+  {
+    key: 'agents',
+    title: '子 Agent',
+    help: '多 Agent 子配置：名称对应 workflow 的 task.agent_id，路径相对本配置文件所在目录解析。可增删改。',
+    advanced: false,
+    fields: [
+      { path: 'agents', label: 'agents', widget: 'agents' },
     ],
   },
   {
@@ -203,15 +213,6 @@ export const CONFIG_SECTIONS: SectionSpec[] = [
       { path: 'evolution.degradation_threshold', label: 'degradation_threshold', widget: 'number' },
       { path: 'evolution.degradation_window_days', label: 'degradation_window_days', widget: 'number' },
       { path: 'evolution.degradation_scan_minutes', label: 'degradation_scan_minutes', widget: 'number' },
-    ],
-  },
-  {
-    key: 'agents',
-    title: '子 Agent (高级·只读)',
-    help: '子 Agent 配置文件路径映射。危险字段，只读展示。',
-    advanced: true,
-    fields: [
-      { path: 'agents', label: 'agents', widget: 'readonly' },
     ],
   },
 ]

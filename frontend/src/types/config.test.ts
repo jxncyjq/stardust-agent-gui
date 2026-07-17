@@ -37,6 +37,14 @@ describe('CONFIG_SECTIONS', () => {
     }
   })
 
+  it('exposes the sub-agent map as an editable widget, not readonly', () => {
+    // agents is user-managed content (name -> sub-config path), editable from
+    // the UI — it is deliberately NOT part of the readonly danger-path set.
+    const agents = allFields.find((x) => x.path === 'agents')
+    expect(agents?.widget).toBe('agents')
+    expect(CONFIG_SECTIONS.find((s) => s.key === 'agents')?.advanced).toBe(false)
+  })
+
   it('has no duplicate paths', () => {
     expect(new Set(paths).size).toBe(paths.length)
   })

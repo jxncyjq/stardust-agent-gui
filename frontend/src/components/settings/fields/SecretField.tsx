@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { EyeIcon, EyeOffIcon } from '../../icons'
 
 // SecretField masks a secret value with a reveal toggle. It never truncates the
 // stored value — only the on-screen rendering is masked.
@@ -14,11 +15,13 @@ export function SecretField({ value, onChange }: { value: string; onChange: (v: 
       />
       <button
         type="button"
-        className="text-xs px-2 rounded hover:bg-muted text-muted-foreground"
+        className="interactive flex items-center justify-center px-2 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
         onClick={() => setShown((v) => !v)}
+        aria-label={shown ? '隐藏密钥' : '显示密钥'}
+        aria-pressed={shown}
         title={shown ? '隐藏' : '显示'}
       >
-        {shown ? '🙈' : '👁'}
+        {shown ? <EyeOffIcon /> : <EyeIcon />}
       </button>
     </div>
   )

@@ -33,79 +33,145 @@ func (a *App) GetConfigPath() (string, error) {
 	return a.cfgPath, nil
 }
 
-// writeConfig validates raw against the authoritative loader and, only if valid,
-// atomically replaces the config file — backing the current one up to
-// <file>.bak first. It performs no service restart, so it is safe to unit-test.
-// Any failure before the rename leaves the live config file untouched.
-func (a *App) writeConfig(raw string) error {
-	if a.cfgPath == "" {
-		return fmt.Errorf("no config path resolved; cannot save config")
+// stagedFile is a validated candidate file waiting to replace a live one. The
+// temp file always sits in the target's own directory so the final rename is an
+// atomic same-volume operation.
+type stagedFile struct {
+	target string
+	tmp    string
+}
+
+// stageFile writes raw to a temp file next to target and validates it with the
+// authoritative loader. It never touches the live file: a failure here leaves
+// the target untouched and removes the temp. The returned stagedFile must be
+// passed to commitStaged (to install it) or discardStaged (to drop it).
+func stageFile(target string, raw string, validate func(path string) error) (stagedFile, error) {
+	dir := filepath.Dir(target)
+	// A brand-new sub-agent config may live in a directory that does not exist
+	// yet; create it here so the temp file (and the later rename) have a home.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return stagedFile{}, fmt.Errorf("create directory %q: %w", dir, err)
 	}
-	dir := filepath.Dir(a.cfgPath)
-	tmp, err := os.CreateTemp(dir, "agent.json.tmp-*")
+	tmp, err := os.CreateTemp(dir, filepath.Base(target)+".tmp-*")
 	if err != nil {
-		return fmt.Errorf("create temp config in %q: %w", dir, err)
+		return stagedFile{}, fmt.Errorf("create temp file in %q: %w", dir, err)
 	}
 	tmpPath := tmp.Name()
-	// Remove the temp file on any early return; a successful rename consumes it
-	// first, making this a harmless no-op.
-	defer os.Remove(tmpPath)
-
 	if _, err := tmp.WriteString(raw); err != nil {
 		tmp.Close()
-		return fmt.Errorf("write temp config %q: %w", tmpPath, err)
+		os.Remove(tmpPath)
+		return stagedFile{}, fmt.Errorf("write temp file %q: %w", tmpPath, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close temp config %q: %w", tmpPath, err)
+		os.Remove(tmpPath)
+		return stagedFile{}, fmt.Errorf("close temp file %q: %w", tmpPath, err)
 	}
+	if err := validate(tmpPath); err != nil {
+		os.Remove(tmpPath)
+		return stagedFile{}, fmt.Errorf("validate new content for %q: %w", target, err)
+	}
+	return stagedFile{target: target, tmp: tmpPath}, nil
+}
 
-	// Authoritative validation through the serve bridge (GUI cannot import
-	// internal/config). Reject malformed/type-mismatched config before the live
-	// file is touched.
-	if err := serve.ValidateConfig(context.Background(), tmpPath); err != nil {
-		return fmt.Errorf("validate new config: %w", err)
+// discardStaged removes the temp files of staged candidates that will not be
+// installed, so a rejected save leaves no litter behind.
+func discardStaged(staged []stagedFile) {
+	for _, f := range staged {
+		os.Remove(f.tmp)
 	}
+}
 
-	// Preserve the live file's permission bits for both the backup and the
-	// replacement. agent.json holds secrets (api_key, admin_token), so the backup
-	// must not be more permissive than the original, and the atomic replace must
-	// not silently relax the live file's mode (os.CreateTemp defaults to 0600).
-	info, err := os.Stat(a.cfgPath)
-	if err != nil {
-		return fmt.Errorf("stat current config %q: %w", a.cfgPath, err)
-	}
-	mode := info.Mode().Perm()
-
-	// Back up the current file so a loadable-but-service-breaking config (e.g. an
-	// unreachable storage path) can be restored by hand.
-	current, err := os.ReadFile(a.cfgPath)
-	if err != nil {
-		return fmt.Errorf("read current config %q for backup: %w", a.cfgPath, err)
-	}
-	bakPath := a.cfgPath + ".bak"
-	if err := os.WriteFile(bakPath, current, mode); err != nil {
-		return fmt.Errorf("write config backup %q: %w", bakPath, err)
-	}
-
-	// Match the temp file's mode to the original so the atomic replace preserves
-	// permissions rather than leaving the restrictive CreateTemp default.
-	if err := os.Chmod(tmpPath, mode); err != nil {
-		return fmt.Errorf("chmod temp config %q: %w", tmpPath, err)
-	}
-
-	if err := os.Rename(tmpPath, a.cfgPath); err != nil {
-		return fmt.Errorf("replace config %q: %w", a.cfgPath, err)
+// commitStaged installs every staged file: the current file (when there is one)
+// is copied to <file>.bak first and its permission bits are carried over to the
+// replacement, so a secret-bearing config is never made more permissive and the
+// atomic replace does not silently relax its mode. A brand-new file (a
+// just-added sub-agent) has nothing to back up and keeps the restrictive
+// temp-file mode.
+func commitStaged(staged []stagedFile) error {
+	for _, f := range staged {
+		info, err := os.Stat(f.target)
+		switch {
+		case err == nil:
+			mode := info.Mode().Perm()
+			current, readErr := os.ReadFile(f.target)
+			if readErr != nil {
+				return fmt.Errorf("read current file %q for backup: %w", f.target, readErr)
+			}
+			bakPath := f.target + ".bak"
+			if err := os.WriteFile(bakPath, current, mode); err != nil {
+				return fmt.Errorf("write backup %q: %w", bakPath, err)
+			}
+			if err := os.Chmod(f.tmp, mode); err != nil {
+				return fmt.Errorf("chmod temp file %q: %w", f.tmp, err)
+			}
+		case os.IsNotExist(err):
+			// New file (e.g. a sub-agent config created from the template):
+			// nothing to back up, keep the temp file's restrictive mode. Its
+			// directory was created during staging.
+		default:
+			return fmt.Errorf("stat target %q: %w", f.target, err)
+		}
+		if err := os.Rename(f.tmp, f.target); err != nil {
+			return fmt.Errorf("replace %q: %w", f.target, err)
+		}
 	}
 	return nil
 }
 
-// SaveConfig persists a new config and restarts the embedded service so the
-// change takes effect without an app restart. On a restart failure the new file
-// is already in place and the previous one is at <file>.bak; the error names the
-// backup and a serve:error event is emitted so the badge explains the outage.
-// Called by React via the Wails bindings from the settings modal.
-func (a *App) SaveConfig(raw string) error {
-	if err := a.writeConfig(raw); err != nil {
+// writeAll validates and installs the main config together with every changed
+// sub-agent config file as one unit: each candidate is staged and validated
+// first, and only when they ALL pass is anything written. A single invalid file
+// therefore leaves the whole configuration untouched. agentFiles maps a
+// sub-agent config path (as written in agent.json) to its new JSON contents.
+// It performs no service restart, so it is safe to unit-test.
+func (a *App) writeAll(mainRaw string, agentFiles map[string]string) error {
+	if a.cfgPath == "" {
+		return fmt.Errorf("no config path resolved; cannot save config")
+	}
+
+	var staged []stagedFile
+
+	mainStaged, err := stageFile(a.cfgPath, mainRaw, func(path string) error {
+		return serve.ValidateConfig(context.Background(), path)
+	})
+	if err != nil {
+		return err
+	}
+	staged = append(staged, mainStaged)
+
+	for rel, raw := range agentFiles {
+		target, err := a.resolveAgentPath(rel)
+		if err != nil {
+			discardStaged(staged)
+			return err
+		}
+		agentStaged, err := stageFile(target, raw, func(path string) error {
+			return serve.ValidateAgentConfig(context.Background(), path)
+		})
+		if err != nil {
+			discardStaged(staged)
+			return err
+		}
+		staged = append(staged, agentStaged)
+	}
+
+	if err := commitStaged(staged); err != nil {
+		// A failure part-way through leaves earlier files replaced and their
+		// .bak alongside; report loudly rather than pretending the save worked.
+		discardStaged(staged)
+		return err
+	}
+	return nil
+}
+
+// SaveAll persists the main config plus every changed sub-agent config file and
+// restarts the embedded service once so all of it takes effect without an app
+// restart. Nothing is written unless every file validates. On a restart failure
+// the new files are already in place and the previous ones are at <file>.bak;
+// the error says so and a serve:error event is emitted so the badge explains the
+// outage. Called by React via the Wails bindings from the settings modal.
+func (a *App) SaveAll(mainRaw string, agentFiles map[string]string) error {
+	if err := a.writeAll(mainRaw, agentFiles); err != nil {
 		return err
 	}
 	if err := a.serve.Restart(a.ctx, a.cfgPath); err != nil {

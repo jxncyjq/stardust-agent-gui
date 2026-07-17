@@ -14,6 +14,10 @@ export function DeleteSession(arg1) {
   return window['go']['main']['App']['DeleteSession'](arg1);
 }
 
+export function GetAgentConfig(arg1) {
+  return window['go']['main']['App']['GetAgentConfig'](arg1);
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
@@ -32,6 +36,10 @@ export function GetTaskResult(arg1) {
 
 export function HandoffTask(arg1, arg2, arg3) {
   return window['go']['main']['App']['HandoffTask'](arg1, arg2, arg3);
+}
+
+export function ListAgents() {
+  return window['go']['main']['App']['ListAgents']();
 }
 
 export function ListAuditEvents() {
@@ -70,8 +78,8 @@ export function RenameSession(arg1, arg2) {
   return window['go']['main']['App']['RenameSession'](arg1, arg2);
 }
 
-export function SaveConfig(arg1) {
-  return window['go']['main']['App']['SaveConfig'](arg1);
+export function SaveAll(arg1, arg2) {
+  return window['go']['main']['App']['SaveAll'](arg1, arg2);
 }
 
 export function SendAgentMessage(arg1, arg2) {
@@ -94,6 +102,6 @@ export function SkillCommand(arg1, arg2) {
   return window['go']['main']['App']['SkillCommand'](arg1, arg2);
 }
 
-export function SubmitTask(arg1, arg2, arg3) {
-  return window['go']['main']['App']['SubmitTask'](arg1, arg2, arg3);
+export function SubmitTask(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SubmitTask'](arg1, arg2, arg3, arg4);
 }

@@ -45,7 +45,7 @@ export function SlashCommandMenu({ commands, activeIndex, onSelect, onHover }: P
           role="option"
           aria-selected={index === activeIndex}
           className={cn(
-            'flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-xs',
+            'interactive flex w-full items-baseline gap-2 px-3 py-1.5 text-left text-xs',
             index === activeIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'
           )}
           // onMouseDown (not onClick) so the textarea does not lose focus and

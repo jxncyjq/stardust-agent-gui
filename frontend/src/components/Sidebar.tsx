@@ -11,6 +11,7 @@ import {
 } from '../../wailsjs/go/main/App'
 import { useSessionStore, type Session } from '../stores/sessionStore'
 import { useUIStore } from '../stores/uiStore'
+import { SettingsIcon, PlusIcon, ChevronDownIcon, ChevronRightIcon } from './icons'
 import { cn } from '../lib/utils'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 
@@ -230,7 +231,7 @@ export function Sidebar() {
       <button
         key={session.id}
         className={cn(
-          'text-left text-xs px-2 py-1 rounded truncate ml-2',
+          'interactive text-left text-xs px-2 py-1 rounded truncate ml-2',
           currentSessionId === session.id
             ? 'bg-accent text-accent-foreground'
             : 'hover:bg-muted text-muted-foreground hover:text-foreground'
@@ -303,13 +304,13 @@ export function Sidebar() {
           />
           <div className="flex gap-1">
             <button
-              className="flex-1 text-xs px-2 py-1 rounded bg-primary text-primary-foreground"
+              className="interactive flex-1 text-xs px-2 py-1 rounded bg-primary text-primary-foreground hover:opacity-90"
               onClick={createSession}
             >
               创建
             </button>
             <button
-              className="text-xs px-2 py-1 rounded hover:bg-muted text-muted-foreground"
+              className="interactive text-xs px-2 py-1 rounded hover:bg-muted text-muted-foreground"
               onClick={() => {
                 setCreating(false)
                 setProjectInput('')
@@ -321,16 +322,17 @@ export function Sidebar() {
         </div>
       ) : (
         <button
-          className="text-left text-xs px-2 py-1 rounded border border-input hover:bg-muted text-foreground"
+          className="interactive flex items-center gap-1.5 text-left text-xs px-2 py-1 rounded border border-input hover:bg-muted text-foreground"
           onClick={() => setCreating(true)}
         >
-          + New session
+          <PlusIcon className="w-3.5 h-3.5" />
+          <span>新建会话</span>
         </button>
       )}
 
       {/* Two-level grouped session tree (active only) */}
       <div className="flex flex-col gap-2">
-        <p className="text-xs text-muted-foreground px-1">Sessions</p>
+        <p className="text-xs text-muted-foreground px-1">会话</p>
         {projectTree(grouped, false)}
       </div>
 
@@ -338,10 +340,12 @@ export function Sidebar() {
       {archived.length > 0 && (
         <div className="flex flex-col gap-1 border-t border-border pt-2">
           <button
-            className="text-left text-xs text-muted-foreground px-1 hover:text-foreground"
+            className="interactive flex items-center gap-1 text-left text-xs text-muted-foreground px-1 hover:text-foreground"
             onClick={() => setShowArchived((v) => !v)}
+            aria-expanded={showArchived}
           >
-            {showArchived ? '▾' : '▸'} 已归档 ({archived.length})
+            {showArchived ? <ChevronDownIcon className="w-3.5 h-3.5" /> : <ChevronRightIcon className="w-3.5 h-3.5" />}
+            <span>已归档 ({archived.length})</span>
           </button>
           {showArchived && (
             <div className="flex flex-col gap-2 opacity-70">
@@ -368,10 +372,11 @@ export function Sidebar() {
       {/* Bottom settings entry */}
       <div className="border-t border-border p-2">
         <button
-          className="w-full text-left text-xs px-2 py-1 rounded hover:bg-muted text-muted-foreground flex items-center gap-2"
+          className="interactive w-full text-left text-xs px-2 py-1 rounded hover:bg-muted hover:text-foreground text-muted-foreground flex items-center gap-2"
           onClick={() => useUIStore.getState().openSettings()}
+          aria-label="打开设置"
         >
-          <span>⚙</span>
+          <SettingsIcon className="w-4 h-4" />
           <span>设置</span>
         </button>
       </div>

@@ -1,3 +1,5 @@
+import { XIcon, PlusIcon } from '../../icons'
+
 // StringListField edits a string[] as one comma-free item per row.
 export function StringListField({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   const list = Array.isArray(value) ? value : []
@@ -13,13 +15,23 @@ export function StringListField({ value, onChange }: { value: string[]; onChange
             value={item}
             onChange={(e) => setAt(i, e.target.value)}
           />
-          <button type="button" className="text-xs px-2 rounded hover:bg-muted text-muted-foreground" onClick={() => remove(i)}>
-            ✕
+          <button
+            type="button"
+            className="interactive flex items-center justify-center px-2 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+            onClick={() => remove(i)}
+            aria-label={`移除第 ${i + 1} 项`}
+          >
+            <XIcon className="w-3.5 h-3.5" />
           </button>
         </div>
       ))}
-      <button type="button" className="text-xs px-2 py-1 rounded border border-input hover:bg-muted text-left" onClick={add}>
-        + 添加
+      <button
+        type="button"
+        className="interactive flex items-center gap-1 text-xs px-2 py-1 rounded border border-input hover:bg-muted text-left"
+        onClick={add}
+      >
+        <PlusIcon className="w-3.5 h-3.5" />
+        <span>添加</span>
       </button>
     </div>
   )

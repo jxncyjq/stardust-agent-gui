@@ -17,6 +17,39 @@ import { useAgentEvents } from '../hooks/useAgentEvents'
 import { MessageBubble } from './MessageBubble'
 import { ExecutionStatus } from './ExecutionStatus'
 import { SlashCommandMenu } from './SlashCommandMenu'
+import { PlusIcon, XIcon, SendIcon, SpinnerIcon, BotIcon } from './icons'
+import { AgentSelector } from './AgentSelector'
+import { useAgentStore } from '../stores/agentStore'
+
+// ChatEmptyState fills the message area before the first message: it gives the
+// otherwise-blank pane an identity, tells the user how to send, and surfaces a
+// few common slash commands as a starting point.
+function ChatEmptyState() {
+  const hints = ['/new', '/sessions', '/tasks', '/skill']
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6 select-none">
+      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+        <BotIcon className="w-7 h-7" />
+      </div>
+      <div>
+        <p className="text-sm font-semibold text-foreground">开始新对话</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          输入消息与 Agent 对话 · Enter 发送 · Shift+Enter 换行 · / 唤出命令
+        </p>
+      </div>
+      <div className="flex flex-wrap justify-center gap-1.5">
+        {hints.map((h) => (
+          <span
+            key={h}
+            className="rounded-md border border-border bg-muted/50 px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+          >
+            {h}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
 import {
   filterSlashCommands,
   parseSlashCommand,
@@ -405,7 +438,8 @@ export function ChatPanel() {
     const startedAt = Date.now()
 
     try {
-      const taskID = await SubmitTask(prompt, sessionID, pendingImages)
+      const agentID = useAgentStore.getState().selected
+      const taskID = await SubmitTask(prompt, sessionID, pendingImages, agentID)
 
       let status = ''
       let result = ''
@@ -470,9 +504,11 @@ export function ChatPanel() {
     <div className="flex flex-col h-full">
       {/* Message list */}
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
+        {messages.length === 0 ? (
+          <ChatEmptyState />
+        ) : (
+          messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -492,11 +528,12 @@ export function ChatPanel() {
                 />
                 <button
                   type="button"
-                  className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground text-xs leading-none flex items-center justify-center"
+                  className="interactive absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center hover:opacity-90"
                   onClick={() => removeImage(index)}
+                  aria-label={`移除图片 ${index + 1}`}
                   title="移除图片"
                 >
-                  ×
+                  <XIcon className="w-3 h-3" />
                 </button>
               </div>
             ))}
@@ -519,15 +556,6 @@ export function ChatPanel() {
           />
         )}
         <div className="flex gap-2">
-          <button
-            type="button"
-            className="px-3 py-2 border border-input rounded-md text-sm disabled:opacity-50"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={sending}
-            title="添加图片"
-          >
-            📎
-          </button>
           <textarea
             className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm"
             rows={3}
@@ -574,12 +602,29 @@ export function ChatPanel() {
             disabled={sending}
           />
           <button
-            className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm disabled:opacity-50"
+            className="interactive flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:opacity-90 disabled:opacity-50"
             onClick={sendMessage}
             disabled={sending}
+            aria-label={sending ? '发送中' : '发送消息'}
           >
-            {sending ? '...' : '发送'}
+            {sending ? <SpinnerIcon /> : <SendIcon />}
+            <span>{sending ? '发送中' : '发送'}</span>
           </button>
+        </div>
+
+        {/* Toolbar row below the input: attach + agent picker. */}
+        <div className="mt-2 flex items-center gap-3">
+          <button
+            type="button"
+            className="interactive flex items-center justify-center h-7 w-7 rounded-md border border-input text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={sending}
+            aria-label="添加图片"
+            title="添加图片"
+          >
+            <PlusIcon />
+          </button>
+          <AgentSelector />
         </div>
       </div>
     </div>

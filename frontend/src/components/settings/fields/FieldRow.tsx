@@ -23,6 +23,10 @@ export function NumberControl({ value, onChange }: { value: number; onChange: (v
       className="text-xs px-2 py-1 rounded border border-input bg-background w-full"
       value={Number.isFinite(value) ? value : ''}
       onChange={(e) => {
+        // An empty box is a transient editing state (user cleared it to retype),
+        // not a request to store 0 — leave the value unchanged until a real
+        // number is entered.
+        if (e.target.value === '') return
         const n = Number(e.target.value)
         if (!Number.isNaN(n)) onChange(n)
       }}

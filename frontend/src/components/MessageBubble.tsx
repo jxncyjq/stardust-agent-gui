@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '../lib/utils'
 import type { Message } from '../stores/chatStore'
+import { TerminalIcon, CopyIcon, DownloadIcon } from './icons'
 
 interface Props {
   message: Message
@@ -44,8 +45,8 @@ export function MessageBubble({ message }: Props) {
   // and prefixed so they read as command output rather than a model reply.
   if (message.role === 'system') {
     return (
-      <div className="self-stretch rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-        <span className="mr-1 font-semibold text-foreground">⌘</span>
+      <div className="self-stretch flex items-start gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <TerminalIcon className="w-3.5 h-3.5 mt-0.5 shrink-0 text-foreground" />
         <span className="whitespace-pre-wrap font-mono">{message.content}</span>
       </div>
     )
@@ -82,18 +83,22 @@ export function MessageBubble({ message }: Props) {
               <span>输出 {formatK(meta.completionTokens)}</span>
             </div>
           )}
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-1">
             <button
-              className="rounded px-2 py-0.5 hover:bg-background hover:text-foreground"
+              className="interactive flex items-center gap-1 rounded px-2 py-0.5 hover:bg-background hover:text-foreground"
               onClick={copy}
+              aria-label={copied ? '已复制' : '复制消息'}
             >
-              {copied ? '已复制' : '复制'}
+              <CopyIcon className="w-3.5 h-3.5" />
+              <span>{copied ? '已复制' : '复制'}</span>
             </button>
             <button
-              className="rounded px-2 py-0.5 hover:bg-background hover:text-foreground"
+              className="interactive flex items-center gap-1 rounded px-2 py-0.5 hover:bg-background hover:text-foreground"
               onClick={() => downloadMarkdown(message.content, message.id)}
+              aria-label="下载为 Markdown"
             >
-              下载
+              <DownloadIcon className="w-3.5 h-3.5" />
+              <span>下载</span>
             </button>
           </div>
         </div>
