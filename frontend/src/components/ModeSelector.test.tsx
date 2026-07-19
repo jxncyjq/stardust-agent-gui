@@ -30,6 +30,15 @@ beforeEach(() => {
 })
 
 describe('ModeSelector', () => {
+  // Regression: mode is per-session, so the select is disabled while no session
+  // is selected. It gave no reason, so the control simply read as broken.
+  it('says why the select is disabled when no session is selected', () => {
+    render(<ModeSelector />)
+
+    expect(screen.getByRole('combobox')).toBeDisabled()
+    expect(screen.getByTitle(/尚未选择会话/)).toBeInTheDocument()
+  })
+
   it('defaults the current session to auto when mode is unset', () => {
     seedSessions()
     render(<ModeSelector />)

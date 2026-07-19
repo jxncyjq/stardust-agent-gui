@@ -73,6 +73,24 @@ describe('ChatPanel working-directory picker', () => {
     expect(screen.getByText('工作目录')).toBeInTheDocument()
   })
 
+  // Regression: with no session selected, onPickWorkingDir returned on its very
+  // first line without telling anyone, so the menu item just looked dead. Every
+  // other failure path in that function already reports via a system message.
+  it('explains why nothing happens when 工作目录 is picked with no session selected', async () => {
+    useSessionStore.setState({ currentSessionId: '', sessions: [] })
+    const user = userEvent.setup()
+    render(<ChatPanel />)
+
+    await openAttachMenu(user)
+    await user.click(screen.getByText('工作目录'))
+
+    // The picker must not open: working_dir binds to a session, and there is none.
+    expect(mocks.PickDirectory).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(screen.getByText(/尚未选择会话/)).toBeInTheDocument()
+    })
+  })
+
   it('picking a directory calls SetSessionWorkingDir and renders a chip', async () => {
     seedSession()
     mocks.PickDirectory.mockResolvedValue('/repo/project')
