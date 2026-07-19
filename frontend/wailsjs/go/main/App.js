@@ -6,6 +6,10 @@ export function BaseURL() {
   return window['go']['main']['App']['BaseURL']();
 }
 
+export function DecideApproval(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DecideApproval'](arg1, arg2, arg3);
+}
+
 export function DeleteProject(arg1) {
   return window['go']['main']['App']['DeleteProject'](arg1);
 }
@@ -66,6 +70,10 @@ export function NewSession(arg1, arg2) {
   return window['go']['main']['App']['NewSession'](arg1, arg2);
 }
 
+export function PickDirectory() {
+  return window['go']['main']['App']['PickDirectory']();
+}
+
 export function Port() {
   return window['go']['main']['App']['Port']();
 }
@@ -96,6 +104,14 @@ export function SetProjectArchived(arg1, arg2) {
 
 export function SetSessionArchived(arg1, arg2) {
   return window['go']['main']['App']['SetSessionArchived'](arg1, arg2);
+}
+
+export function SetSessionMode(arg1, arg2) {
+  return window['go']['main']['App']['SetSessionMode'](arg1, arg2);
+}
+
+export function SetSessionWorkingDir(arg1, arg2) {
+  return window['go']['main']['App']['SetSessionWorkingDir'](arg1, arg2);
 }
 
 export function SkillCommand(arg1, arg2) {

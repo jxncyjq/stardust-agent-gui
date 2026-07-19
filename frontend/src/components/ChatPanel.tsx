@@ -19,6 +19,7 @@ import { ExecutionStatus } from './ExecutionStatus'
 import { SlashCommandMenu } from './SlashCommandMenu'
 import { PlusIcon, XIcon, SendIcon, SpinnerIcon, BotIcon } from './icons'
 import { AgentSelector } from './AgentSelector'
+import { ModeSelector } from './ModeSelector'
 import { useAgentStore } from '../stores/agentStore'
 
 // ChatEmptyState fills the message area before the first message: it gives the
@@ -612,7 +613,7 @@ export function ChatPanel() {
           </button>
         </div>
 
-        {/* Toolbar row below the input: attach + agent picker. */}
+        {/* Toolbar row below the input: attach + agent picker + mode picker. */}
         <div className="mt-2 flex items-center gap-3">
           <button
             type="button"
@@ -625,6 +626,7 @@ export function ChatPanel() {
             <PlusIcon />
           </button>
           <AgentSelector />
+          <ModeSelector />
         </div>
       </div>
     </div>
