@@ -3,6 +3,7 @@ import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import { ServeStatus } from '../../wailsjs/go/main/App'
 import { useChatStore } from '../stores/chatStore'
 import { useServeStore } from '../stores/serveStore'
+import { useApprovalStore } from '../stores/approvalStore'
 
 export function useAgentEvents() {
   const appendToken = useChatStore((s) => s.appendToken)
@@ -38,9 +39,42 @@ export function useAgentEvents() {
       setStatus(status.running, status.port)
     }
 
+    // handleApproval routes the dedicated agent:approval channel (Task 2's
+    // sse_bridge.go) to the approval store. The payload's `data` field is the
+    // raw SSE data line as a JSON string (the Go side does not unmarshal it),
+    // so it must be parsed here before use.
+    const handleApproval = (payload: { type: string; data: string }) => {
+      let parsed: Record<string, unknown>
+      try {
+        parsed = JSON.parse(payload.data)
+      } catch (err) {
+        console.error('agent:approval payload was not valid JSON:', payload, err)
+        return
+      }
+      if (payload.type === 'approval_pending') {
+        useApprovalStore.getState().onPending(parsed)
+      } else if (payload.type === 'approval_resolved') {
+        useApprovalStore.getState().onResolved(parsed)
+      } else {
+        console.error('agent:approval unexpected type:', payload.type)
+      }
+    }
+
     EventsOn('agent:token', handleToken)
     EventsOn('agent:event', handleEvent)
     EventsOn('serve:status', handleStatus)
+    EventsOn('agent:approval', handleApproval)
+
+    // The SSE stream is at-most-once and this hook may mount after the server
+    // already emitted approval_pending, so pull the current pending tickets
+    // as a reconciliation fallback (see approvalStore.load). A failure here
+    // must not crash the panel, but must not be silent either.
+    useApprovalStore
+      .getState()
+      .load()
+      .catch((err) => {
+        console.error('load pending approvals failed:', err)
+      })
 
     // The startup serve:status event may fire before this hook mounts, and Wails
     // events are not buffered. Actively pull the current status (and retry a few
@@ -66,6 +100,7 @@ export function useAgentEvents() {
       EventsOff('agent:token')
       EventsOff('agent:event')
       EventsOff('serve:status')
+      EventsOff('agent:approval')
     }
   }, [appendToken, setStatus])
 }

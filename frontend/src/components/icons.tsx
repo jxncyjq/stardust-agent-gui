@@ -186,6 +186,15 @@ export function BotIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+// FolderIcon marks the bound working-directory chip in the chat input toolbar.
+export function FolderIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+    </Icon>
+  )
+}
+
 // SparkleIcon marks the running-task indicator (replaces the ✳ glyph).
 export function SparkleIcon(props: SVGProps<SVGSVGElement>) {
   return (

@@ -18,7 +18,7 @@ import { ContextMenu, type ContextMenuItem } from './ContextMenu'
 // mapSession normalizes the loosely-typed Wails binding result (Record<string,
 // any> from the Go map) into the Session shape the store expects. Sessions
 // without an id are dropped rather than rendered as broken rows.
-function mapSession(raw: any): Session | null {
+export function mapSession(raw: any): Session | null {
   const id = String(raw?.id ?? '')
   if (!id) return null
   return {
@@ -28,6 +28,8 @@ function mapSession(raw: any): Session | null {
     title: String(raw?.title ?? ''),
     archived: Boolean(raw?.archived ?? false),
     updatedAt: String(raw?.updated_at ?? ''),
+    mode: raw?.mode != null ? String(raw.mode) : undefined,
+    workingDir: raw?.working_dir != null ? String(raw.working_dir) : undefined,
   }
 }
 

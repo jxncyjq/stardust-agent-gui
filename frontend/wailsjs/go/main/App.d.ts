@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function BaseURL():Promise<string>;
 
+export function DecideApproval(arg1:string,arg2:string,arg3:string):Promise<void>;
+
 export function DeleteProject(arg1:string):Promise<void>;
 
 export function DeleteSession(arg1:string):Promise<void>;
@@ -26,6 +28,8 @@ export function ListAuditEvents():Promise<Array<Record<string, any>>>;
 
 export function ListInbox():Promise<Array<Record<string, any>>>;
 
+export function ListPendingApprovals():Promise<Array<Record<string, any>>>;
+
 export function ListRuntimeEvents():Promise<Array<Record<string, any>>>;
 
 export function ListSessions():Promise<Array<Record<string, any>>>;
@@ -33,6 +37,8 @@ export function ListSessions():Promise<Array<Record<string, any>>>;
 export function ListTasks():Promise<Array<Record<string, any>>>;
 
 export function NewSession(arg1:string,arg2:string):Promise<Record<string, any>>;
+
+export function PickDirectory():Promise<string>;
 
 export function Port():Promise<number>;
 
@@ -49,6 +55,10 @@ export function ServeStatus():Promise<Record<string, any>>;
 export function SetProjectArchived(arg1:string,arg2:boolean):Promise<void>;
 
 export function SetSessionArchived(arg1:string,arg2:boolean):Promise<void>;
+
+export function SetSessionMode(arg1:string,arg2:string):Promise<void>;
+
+export function SetSessionWorkingDir(arg1:string,arg2:string):Promise<void>;
 
 export function SkillCommand(arg1:string,arg2:string):Promise<string>;
 
