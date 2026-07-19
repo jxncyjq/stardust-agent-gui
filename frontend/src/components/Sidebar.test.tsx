@@ -19,4 +19,14 @@ describe('mapSession', () => {
   it('drops sessions without an id regardless of mode', () => {
     expect(mapSession({ mode: 'auto' })).toBeNull()
   })
+
+  it('carries the backend working_dir field through as workingDir', () => {
+    const session = mapSession({ id: 's1', project: 'p', agent_id: 'a', title: 't', working_dir: '/repo' })
+    expect(session?.workingDir).toBe('/repo')
+  })
+
+  it('leaves workingDir undefined when the backend omits working_dir', () => {
+    const session = mapSession({ id: 's1', project: 'p', agent_id: 'a', title: 't' })
+    expect(session?.workingDir).toBeUndefined()
+  })
 })

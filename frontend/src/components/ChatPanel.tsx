@@ -8,6 +8,8 @@ import {
   SendAgentMessage,
   HandoffTask,
   SkillCommand,
+  PickDirectory,
+  SetSessionWorkingDir,
 } from '../../wailsjs/go/main/App'
 import { useChatStore } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
@@ -17,7 +19,8 @@ import { useAgentEvents } from '../hooks/useAgentEvents'
 import { MessageBubble } from './MessageBubble'
 import { ExecutionStatus } from './ExecutionStatus'
 import { SlashCommandMenu } from './SlashCommandMenu'
-import { PlusIcon, XIcon, SendIcon, SpinnerIcon, BotIcon } from './icons'
+import { ContextMenu } from './ContextMenu'
+import { PlusIcon, XIcon, SendIcon, SpinnerIcon, BotIcon, FolderIcon } from './icons'
 import { AgentSelector } from './AgentSelector'
 import { ModeSelector } from './ModeSelector'
 import { useAgentStore } from '../stores/agentStore'
@@ -78,6 +81,10 @@ export function ChatPanel() {
   const clearMessages = useChatStore((s) => s.clearMessages)
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const setCurrentSession = useSessionStore((s) => s.setCurrentSession)
+  const workingDir = useSessionStore((s) =>
+    s.sessions.find((session) => session.id === s.currentSessionId)?.workingDir
+  )
+  const setSessionWorkingDir = useSessionStore((s) => s.setSessionWorkingDir)
   const setActiveStatusTab = useStatusStore((s) => s.setActiveTab)
 
   // Slash command palette state: the filtered command list and the highlighted
@@ -113,6 +120,11 @@ export function ChatPanel() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // attachMenu holds the screen position of the "+" popup (image / working
+  // directory); null means closed. Positioned at the click point, same
+  // convention as Sidebar's right-click ContextMenu.
+  const [attachMenu, setAttachMenu] = useState<{ x: number; y: number } | null>(null)
+
   // readFileAsDataURL resolves a File to its data-URI string via FileReader.
   function readFileAsDataURL(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
@@ -140,6 +152,29 @@ export function ChatPanel() {
 
   function removeImage(index: number) {
     setImages((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  // onPickWorkingDir opens the native directory picker and, if the user chose
+  // a directory (a cancelled dialog returns ""), binds it to the current
+  // session. working_dir is set-once on the backend: once workingDir is
+  // already set, this is not called (see the disabled menu item below), and a
+  // 400 from a stale/racing call is reported rather than swallowed.
+  async function onPickWorkingDir() {
+    if (!currentSessionId) return
+    let dir: string
+    try {
+      dir = await PickDirectory()
+    } catch (err) {
+      addSystem(`选择工作目录失败: ${errText(err)}`)
+      return
+    }
+    if (!dir) return // user cancelled the dialog: a legitimate no-op, not an error
+    try {
+      await SetSessionWorkingDir(currentSessionId, dir)
+      setSessionWorkingDir(currentSessionId, dir)
+    } catch (err) {
+      addSystem(`设置工作目录失败: ${errText(err)}`)
+    }
   }
 
   useEffect(() => {
@@ -613,18 +648,50 @@ export function ChatPanel() {
           </button>
         </div>
 
-        {/* Toolbar row below the input: attach + agent picker + mode picker. */}
+        {/* Toolbar row below the input: working-dir chip + attach menu + agent picker + mode picker. */}
         <div className="mt-2 flex items-center gap-3">
+          {workingDir && (
+            <div
+              className="flex items-center gap-1 rounded-md border border-input bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
+              title={`工作目录: ${workingDir}（绑定后不可更改）`}
+            >
+              <FolderIcon className="w-3.5 h-3.5" />
+              <span className="max-w-[160px] truncate">{workingDir}</span>
+            </div>
+          )}
           <button
             type="button"
             className="interactive flex items-center justify-center h-7 w-7 rounded-md border border-input text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={(e) => setAttachMenu({ x: e.clientX, y: e.clientY })}
             disabled={sending}
-            aria-label="添加图片"
-            title="添加图片"
+            aria-label="添加附件"
+            title="添加附件"
           >
             <PlusIcon />
           </button>
+          {attachMenu && (
+            <ContextMenu
+              x={attachMenu.x}
+              y={attachMenu.y}
+              onClose={() => setAttachMenu(null)}
+              items={[
+                {
+                  label: '图片',
+                  onSelect: () => fileInputRef.current?.click(),
+                },
+                {
+                  label: workingDir ? '工作目录（已绑定，不可更改）' : '工作目录',
+                  onSelect: () => {
+                    if (workingDir) {
+                      addSystem('工作目录已绑定，不可更改')
+                      return
+                    }
+                    onPickWorkingDir()
+                  },
+                },
+              ]}
+            />
+          )}
           <AgentSelector />
           <ModeSelector />
         </div>

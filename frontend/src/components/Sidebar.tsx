@@ -29,6 +29,7 @@ export function mapSession(raw: any): Session | null {
     archived: Boolean(raw?.archived ?? false),
     updatedAt: String(raw?.updated_at ?? ''),
     mode: raw?.mode != null ? String(raw.mode) : undefined,
+    workingDir: raw?.working_dir != null ? String(raw.working_dir) : undefined,
   }
 }
 
