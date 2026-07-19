@@ -41,7 +41,12 @@ export function ModeSelector() {
   }
 
   return (
-    <label className="flex items-center gap-1 text-xs text-muted-foreground" title="选择会话模式">
+    <label
+      className="flex items-center gap-1 text-xs text-muted-foreground"
+      // Mode is per-session, so the select is disabled with no session selected.
+      // Say why, otherwise the control just reads as broken.
+      title={currentSessionId ? '选择会话模式' : '尚未选择会话，请先在左侧选择或新建会话'}
+    >
       <SparkleIcon className="w-4 h-4" />
       <select
         className="rounded border border-input bg-background px-1.5 py-0.5 text-xs text-foreground"

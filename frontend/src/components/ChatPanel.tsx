@@ -161,7 +161,13 @@ export function ChatPanel() {
   // already set, this is not called (see the disabled menu item below), and a
   // 400 from a stale/racing call is reported rather than swallowed.
   async function onPickWorkingDir() {
-    if (!currentSessionId) return
+    if (!currentSessionId) {
+      // Not a no-op worth swallowing: the menu item is enabled, so returning
+      // silently makes it read as a dead button. working_dir binds to a
+      // session, and unlike sendMessage this flow does not create one.
+      addSystem('尚未选择会话，请先在左侧选择或新建会话，再设置工作目录')
+      return
+    }
     let dir: string
     try {
       dir = await PickDirectory()
