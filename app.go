@@ -61,6 +61,12 @@ func (a *App) startup(ctx context.Context) {
 		// is disconnected instead of looking like a mystery.
 		fmt.Fprintf(os.Stderr, "serve start failed (config=%q): %v\n", a.cfgPath, err)
 		runtime.EventsEmit(ctx, "serve:error", map[string]any{"error": err.Error()})
+	} else {
+		// baseURLFn (not a captured string) so the bridge re-reads a.BaseURL()
+		// on every reconnect: SaveAll can restart the embedded service on a new
+		// random port (see ServeManager.Restart), and a cached URL would leave
+		// the bridge dialing the old, now-dead port forever.
+		StartSSEBridge(ctx, ctx, a.BaseURL)
 	}
 	a.writeStartupLog(err)
 }
