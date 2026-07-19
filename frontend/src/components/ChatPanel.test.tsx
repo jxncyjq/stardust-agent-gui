@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   SetSessionMode: vi.fn(),
   ListAgents: vi.fn(),
   ServeStatus: vi.fn(),
+  ListPendingApprovals: vi.fn(),
 }))
 vi.mock('../../wailsjs/go/main/App', () => mocks)
 vi.mock('../../wailsjs/runtime/runtime', () => ({
@@ -30,6 +31,7 @@ import { useSessionStore } from '../stores/sessionStore'
 import { useChatStore } from '../stores/chatStore'
 import { useAgentStore } from '../stores/agentStore'
 import { useRunStore } from '../stores/runStore'
+import { useApprovalStore } from '../stores/approvalStore'
 
 function seedSession(workingDir?: string) {
   useSessionStore.setState({
@@ -45,10 +47,12 @@ beforeEach(() => {
   mocks.GetSessionTurns.mockResolvedValue([])
   mocks.ListAgents.mockResolvedValue([])
   mocks.ServeStatus.mockResolvedValue({ running: true, port: 0 })
+  mocks.ListPendingApprovals.mockResolvedValue([])
   useChatStore.setState({ messages: [] })
   useSessionStore.setState({ currentSessionId: '', sessions: [] })
   useRunStore.setState({ runs: {}, now: Date.now() })
   useAgentStore.setState({ agents: [], selected: 'default-agent', error: '' })
+  useApprovalStore.setState({ pending: [] })
 })
 
 // Opens the "+" popup menu, which offers "图片" (existing image attach flow,

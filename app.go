@@ -633,6 +633,26 @@ func (a *App) GetTaskResult(taskID string) (map[string]any, error) {
 	return result, nil
 }
 
+// ListPendingApprovals returns the pending Manual-mode approval tickets the
+// server has on disk, so the UI can reconcile any approval_pending events it
+// missed over the at-most-once SSE stream (or before the frontend
+// subscribed). Each ticket carries ticket_id/task_id/tool_name/arguments per
+// the server's GET /v1/approvals response. Called by React via the Wails
+// bindings.
+func (a *App) ListPendingApprovals() ([]map[string]any, error) {
+	body, err := a.apiGet("/v1/approvals?status=pending")
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Approvals []map[string]any `json:"approvals"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("decode pending approvals: %w", err)
+	}
+	return result.Approvals, nil
+}
+
 // DecideApproval posts a human's approve/deny decision on a Manual-mode tool
 // approval ticket via POST /v1/tasks/{taskID}/approvals/{ticketID}. decision
 // must be "approve" or "deny" — the verb form the server's endpoint expects,

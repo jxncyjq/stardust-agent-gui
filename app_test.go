@@ -97,6 +97,42 @@ func TestSetSessionWorkingDirSetOnceRejectsChange(t *testing.T) {
 	}
 }
 
+func TestListPendingApprovalsParsesApprovalsArray(t *testing.T) {
+	var gotMethod, gotPath string
+	a := newFakeBackendApp(t, func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"approvals":[{"ticket_id":"t1","task_id":"task-1","tool_name":"shell","arguments":{"cmd":"ls"}}]}`))
+	})
+	got, err := a.ListPendingApprovals()
+	if err != nil {
+		t.Fatalf("ListPendingApprovals: %v", err)
+	}
+	if gotMethod != http.MethodGet {
+		t.Errorf("method = %q, want GET", gotMethod)
+	}
+	if gotPath != "/v1/approvals" {
+		t.Errorf("path = %q, want /v1/approvals", gotPath)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0]["ticket_id"] != "t1" {
+		t.Errorf("got[0][ticket_id] = %v, want %q", got[0]["ticket_id"], "t1")
+	}
+}
+
+func TestListPendingApprovalsSurfacesDecodeError(t *testing.T) {
+	a := newFakeBackendApp(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`not json`))
+	})
+	if _, err := a.ListPendingApprovals(); err == nil {
+		t.Fatal("expected error for a malformed response body, got nil")
+	}
+}
+
 func TestDecideApprovalPostsDecisionVerb(t *testing.T) {
 	var gotMethod, gotPath string
 	var gotBody map[string]any

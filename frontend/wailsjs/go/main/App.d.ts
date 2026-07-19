@@ -28,6 +28,8 @@ export function ListAuditEvents():Promise<Array<Record<string, any>>>;
 
 export function ListInbox():Promise<Array<Record<string, any>>>;
 
+export function ListPendingApprovals():Promise<Array<Record<string, any>>>;
+
 export function ListRuntimeEvents():Promise<Array<Record<string, any>>>;
 
 export function ListSessions():Promise<Array<Record<string, any>>>;

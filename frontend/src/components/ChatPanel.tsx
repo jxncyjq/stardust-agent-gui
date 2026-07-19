@@ -23,6 +23,7 @@ import { ContextMenu } from './ContextMenu'
 import { PlusIcon, XIcon, SendIcon, SpinnerIcon, BotIcon, FolderIcon } from './icons'
 import { AgentSelector } from './AgentSelector'
 import { ModeSelector } from './ModeSelector'
+import { ApprovalPrompt } from './ApprovalPrompt'
 import { useAgentStore } from '../stores/agentStore'
 
 // ChatEmptyState fills the message area before the first message: it gives the
@@ -547,6 +548,10 @@ export function ChatPanel() {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {/* Pending Manual-mode approval tickets, rendered above the input like a
+          persistent system notice. */}
+      <ApprovalPrompt />
 
       {/* Input */}
       <div className="border-t border-border p-3">

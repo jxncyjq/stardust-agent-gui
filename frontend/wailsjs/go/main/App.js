@@ -54,6 +54,10 @@ export function ListInbox() {
   return window['go']['main']['App']['ListInbox']();
 }
 
+export function ListPendingApprovals() {
+  return window['go']['main']['App']['ListPendingApprovals']();
+}
+
 export function ListRuntimeEvents() {
   return window['go']['main']['App']['ListRuntimeEvents']();
 }
