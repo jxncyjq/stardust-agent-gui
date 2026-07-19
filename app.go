@@ -384,6 +384,34 @@ func (a *App) SetSessionArchived(id string, archived bool) error {
 	return a.patchSession(id, map[string]any{"archived": archived})
 }
 
+// SetSessionMode sets a session's working mode (manual|plan|auto) via PATCH.
+// It is a thin wrapper over patchSession, mirroring RenameSession and
+// SetSessionArchived. Mode validation is the server's responsibility (400 on
+// an unknown value), surfaced here as the returned error. Called by React via
+// the Wails bindings.
+func (a *App) SetSessionMode(sessionID, mode string) error {
+	return a.patchSession(sessionID, map[string]any{"mode": mode})
+}
+
+// SetSessionWorkingDir binds a session's working directory via PATCH. The
+// server treats working_dir as set-once: changing an already-bound
+// working_dir to a different value returns 400, surfaced here as an error the
+// frontend must display (working_dir cannot be changed once bound) rather
+// than swallow. Called by React via the Wails bindings.
+func (a *App) SetSessionWorkingDir(sessionID, dir string) error {
+	return a.patchSession(sessionID, map[string]any{"working_dir": dir})
+}
+
+// PickDirectory opens the native directory picker and returns the chosen
+// absolute path. An empty string with a nil error means the user cancelled
+// the dialog — a legitimate outcome, not a failure. The frontend pairs this
+// with SetSessionWorkingDir. Called by React via the Wails bindings.
+func (a *App) PickDirectory() (string, error) {
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "选择工作目录",
+	})
+}
+
 // RenameProject moves every session under oldProject to newProject. The backend
 // has no project-level route, so the Go side enumerates the sessions and patches
 // each one. The first failure aborts loudly and names the offending session, so
@@ -597,4 +625,43 @@ func (a *App) GetTaskResult(taskID string) (map[string]any, error) {
 		return nil, fmt.Errorf("decode task result: %w", err)
 	}
 	return result, nil
+}
+
+// DecideApproval posts a human's approve/deny decision on a Manual-mode tool
+// approval ticket via POST /v1/tasks/{taskID}/approvals/{ticketID}. decision
+// must be "approve" or "deny" — the verb form the server's endpoint expects,
+// distinct from the "approved"/"denied" past tense used in the
+// approval_resolved SSE event. postJSON does not itself fail loud on a
+// non-2xx status (it hands the status back for the caller to interpret), so
+// the status is checked here: 404 means the ticket no longer exists, 409
+// means it was already decided, and any other non-200 status is surfaced
+// verbatim. Called by React via the Wails bindings.
+func (a *App) DecideApproval(taskID, ticketID, decision string) error {
+	taskID = strings.TrimSpace(taskID)
+	ticketID = strings.TrimSpace(ticketID)
+	decision = strings.TrimSpace(decision)
+	if taskID == "" {
+		return fmt.Errorf("task id is required")
+	}
+	if ticketID == "" {
+		return fmt.Errorf("ticket id is required")
+	}
+	if decision == "" {
+		return fmt.Errorf("decision is required")
+	}
+	path := "/v1/tasks/" + taskID + "/approvals/" + ticketID
+	body, status, err := a.postJSON(path, map[string]any{"decision": decision})
+	if err != nil {
+		return err
+	}
+	switch status {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound:
+		return fmt.Errorf("decide approval %q for task %q: ticket not found: %s", ticketID, taskID, strings.TrimSpace(string(body)))
+	case http.StatusConflict:
+		return fmt.Errorf("decide approval %q for task %q: already decided: %s", ticketID, taskID, strings.TrimSpace(string(body)))
+	default:
+		return fmt.Errorf("decide approval %q for task %q failed: status %d: %s", ticketID, taskID, status, strings.TrimSpace(string(body)))
+	}
 }
