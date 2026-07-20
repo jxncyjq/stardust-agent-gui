@@ -21,6 +21,12 @@ export interface Message {
   content: string
   streaming?: boolean
   meta?: MessageMeta
+  // agent is the sub-agent that produced an assistant message. It belongs on
+  // the message rather than on the session: a session's agent_id is fixed when
+  // the session is created, but the answering agent is picked per submission,
+  // so one session can legitimately hold replies from different agents.
+  // Undefined for user/system messages and for history predating the field.
+  agent?: string
 }
 
 interface ChatState {

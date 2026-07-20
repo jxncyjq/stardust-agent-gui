@@ -62,6 +62,15 @@ export function MessageBubble({ message }: Props) {
         ? 'self-end bg-primary text-primary-foreground ml-auto'
         : 'self-start bg-muted text-foreground'
     )}>
+      {/* Which sub-agent answered. Labelled per message, not per session: the
+          answering agent is chosen at submission time, so one session can hold
+          replies from different agents. Absent for history predating the field. */}
+      {isAssistant && message.agent && (
+        <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground truncate">
+          {message.agent}
+        </p>
+      )}
+
       {isAssistant ? (
         // react-markdown v10 dropped the `className` prop; wrap instead.
         <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:bg-background prose-pre:text-foreground prose-table:my-2 prose-headings:mt-3 prose-headings:mb-1">
@@ -71,6 +80,22 @@ export function MessageBubble({ message }: Props) {
         </div>
       ) : (
         <p className="whitespace-pre-wrap">{message.content}</p>
+      )}
+
+      {/* A prompt is as worth copying as a reply — re-sending a tweaked version
+          is routine. Only copy applies here: saving a prompt as Markdown has no
+          use, so no download button. */}
+      {message.role === 'user' && (
+        <div className="mt-2 flex justify-end border-t border-primary-foreground/20 pt-2 text-xs">
+          <button
+            className="interactive flex items-center gap-1 rounded px-2 py-0.5 opacity-80 hover:opacity-100"
+            onClick={copy}
+            aria-label={copied ? '已复制' : '复制消息'}
+          >
+            <CopyIcon className="w-3.5 h-3.5" />
+            <span>{copied ? '已复制' : '复制'}</span>
+          </button>
+        </div>
       )}
 
       {isAssistant && (

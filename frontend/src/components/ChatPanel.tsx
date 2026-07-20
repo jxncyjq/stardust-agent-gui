@@ -212,11 +212,16 @@ export function ChatPanel() {
           const role = String((turn as any)?.role ?? '')
           const content = String((turn as any)?.content ?? '')
           const createdAt = String((turn as any)?.created_at ?? '')
+          // The backend turn carries the agent that produced it; surface it so
+          // replayed history is labelled exactly like live replies. Older turns
+          // may have none — leave it undefined rather than inventing a default.
+          const agent = String((turn as any)?.agent_id ?? '')
           if (role !== 'user' && role !== 'assistant') continue
           addMessage({
             id: `${currentSessionId}-${role}-${createdAt}`,
             role,
             content,
+            agent: agent || undefined,
           })
         }
       } catch (err) {
@@ -342,8 +347,14 @@ export function ChatPanel() {
             const role = String((turn as any)?.role ?? '')
             const content = String((turn as any)?.content ?? '')
             const createdAt = String((turn as any)?.created_at ?? '')
+            const agent = String((turn as any)?.agent_id ?? '')
             if (role !== 'user' && role !== 'assistant') continue
-            addMessage({ id: `${currentSessionId}-${role}-${createdAt}`, role, content })
+            addMessage({
+              id: `${currentSessionId}-${role}-${createdAt}`,
+              role,
+              content,
+              agent: agent || undefined,
+            })
           }
           addSystem('已刷新对话历史（见上方）')
         } catch (err) {
@@ -480,8 +491,12 @@ export function ChatPanel() {
     startRun(sessionID)
     const startedAt = Date.now()
 
+    // Read outside the try so the catch below can label its error message with
+    // the same agent, and snapshot it now: the picker may change while the task
+    // is in flight, and the reply belongs to the agent that actually ran it.
+    const agentID = useAgentStore.getState().selected
+
     try {
-      const agentID = useAgentStore.getState().selected
       const taskID = await SubmitTask(prompt, sessionID, pendingImages, agentID)
 
       let status = ''
@@ -519,6 +534,7 @@ export function ChatPanel() {
           id: `assistant-${taskID}`,
           role: 'assistant',
           content,
+          agent: agentID,
           meta: {
             elapsedSec: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
             promptTokens,
@@ -534,6 +550,7 @@ export function ChatPanel() {
           id: `assistant-error-${Date.now()}`,
           role: 'assistant',
           content: `发送失败: ${err instanceof Error ? err.message : String(err)}`,
+          agent: agentID,
         })
       }
     } finally {

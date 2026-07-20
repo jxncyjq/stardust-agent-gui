@@ -33,21 +33,21 @@ export function mapSession(raw: any): Session | null {
   }
 }
 
-// groupSessions builds the two-level project -> agent -> sessions structure used
-// for the sidebar tree.
-function groupSessions(sessions: Session[]): Map<string, Map<string, Session[]>> {
-  const byProject = new Map<string, Map<string, Session[]>>()
+// groupSessions builds the project -> sessions structure used for the sidebar
+// tree.
+//
+// Sessions are deliberately NOT grouped by agent. A session's agent_id is fixed
+// when the session is created, while the agent that actually answers is chosen
+// per submission — so an agent level here would show the creation-time value
+// and contradict what actually ran. The answering agent is labelled on each
+// assistant message instead, where it is accurate.
+export function groupSessions(sessions: Session[]): Map<string, Session[]> {
+  const byProject = new Map<string, Session[]>()
   for (const session of sessions) {
     const projectKey = session.project || '默认任务'
-    const agentKey = session.agent || 'default-agent'
-    let byAgent = byProject.get(projectKey)
-    if (!byAgent) {
-      byAgent = new Map<string, Session[]>()
-      byProject.set(projectKey, byAgent)
-    }
-    const list = byAgent.get(agentKey) ?? []
+    const list = byProject.get(projectKey) ?? []
     list.push(session)
-    byAgent.set(agentKey, list)
+    byProject.set(projectKey, list)
   }
   return byProject
 }
@@ -250,11 +250,11 @@ export function Sidebar() {
   }
 
   function projectTree(
-    tree: Map<string, Map<string, Session[]>>,
+    tree: Map<string, Session[]>,
     isArchived: boolean
   ) {
-    return [...tree.entries()].map(([project, byAgent]) => {
-      const ids = [...byAgent.values()].flat().map((s) => s.id)
+    return [...tree.entries()].map(([project, projectSessions]) => {
+      const ids = projectSessions.map((s) => s.id)
       const projectKey = `project:${project}`
       return (
         <div key={project} className="flex flex-col gap-1">
@@ -271,14 +271,9 @@ export function Sidebar() {
               {project}
             </p>
           )}
-          {[...byAgent.entries()].map(([agent, agentSessions]) => (
-            <div key={agent} className="flex flex-col gap-0.5 pl-2">
-              <p className="text-[10px] uppercase tracking-wide text-muted-foreground px-1 truncate">
-                {agent}
-              </p>
-              {agentSessions.map((session) => sessionRow(session))}
-            </div>
-          ))}
+          <div className="flex flex-col gap-0.5 pl-2">
+            {projectSessions.map((session) => sessionRow(session))}
+          </div>
         </div>
       )
     })
