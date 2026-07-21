@@ -17,8 +17,8 @@ function seedSessions() {
   useSessionStore.setState({
     currentSessionId: 's1',
     sessions: [
-      { id: 's1', project: 'p', agent: 'a', title: 't1', archived: false, updatedAt: '', mode: undefined },
-      { id: 's2', project: 'p', agent: 'a', title: 't2', archived: false, updatedAt: '', mode: 'plan' },
+      { id: 's1', project: 'p', title: 't1', archived: false, updatedAt: '', mode: undefined },
+      { id: 's2', project: 'p', title: 't2', archived: false, updatedAt: '', mode: 'plan' },
     ],
   })
 }

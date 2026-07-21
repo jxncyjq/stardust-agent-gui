@@ -5,7 +5,6 @@ import { create } from 'zustand'
 export interface Session {
   id: string
   project: string
-  agent: string
   title: string
   archived: boolean
   updatedAt: string
