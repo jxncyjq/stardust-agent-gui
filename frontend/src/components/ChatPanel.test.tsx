@@ -37,7 +37,7 @@ function seedSession(workingDir?: string) {
   useSessionStore.setState({
     currentSessionId: 's1',
     sessions: [
-      { id: 's1', project: 'p', agent: 'a', title: 't1', archived: false, updatedAt: '', workingDir },
+      { id: 's1', project: 'p', title: 't1', archived: false, updatedAt: '', workingDir },
     ],
   })
 }

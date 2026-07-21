@@ -24,7 +24,7 @@ export function mapSession(raw: any): Session | null {
   return {
     id,
     project: String(raw?.project ?? ''),
-    agent: String(raw?.agent_id ?? ''),
+    // agent_id is deliberately not carried onto Session: see groupSessions.
     title: String(raw?.title ?? ''),
     archived: Boolean(raw?.archived ?? false),
     updatedAt: String(raw?.updated_at ?? ''),
@@ -36,11 +36,11 @@ export function mapSession(raw: any): Session | null {
 // groupSessions builds the project -> sessions structure used for the sidebar
 // tree.
 //
-// Sessions are deliberately NOT grouped by agent. A session's agent_id is fixed
-// when the session is created, while the agent that actually answers is chosen
-// per submission — so an agent level here would show the creation-time value
-// and contradict what actually ran. The answering agent is labelled on each
-// assistant message instead, where it is accurate.
+// Sessions are deliberately NOT grouped by agent, and Session carries no agent
+// field at all. The agent that actually answers is chosen per submission and can
+// differ between turns of one session, so any session-level agent would
+// contradict what ran. The answering agent is labelled on each assistant message
+// instead, where it is accurate. NewSession correspondingly sends no agent_id.
 export function groupSessions(sessions: Session[]): Map<string, Session[]> {
   const byProject = new Map<string, Session[]>()
   for (const session of sessions) {

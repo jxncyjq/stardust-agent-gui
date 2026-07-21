@@ -190,3 +190,36 @@ func TestDecideApprovalRequiresIDsAndDecision(t *testing.T) {
 		t.Fatal("expected error for empty decision")
 	}
 }
+
+// TestNewSessionDoesNotClaimAnAgent pins the semantics PR #3 settled on: an
+// agent belongs to a message, not to a session. NewSession used to post
+// agent_id: "default-agent" — a value it had no basis for. The session record
+// then reported an agent that had never answered anything, and could not: the
+// answering agent is chosen per submission.
+//
+// The field is now omitted entirely. The server still defaults its own stored
+// agent_id, but the GUI no longer asserts something it does not know.
+func TestNewSessionDoesNotClaimAnAgent(t *testing.T) {
+	var gotBody map[string]any
+	a := newFakeBackendApp(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"sess-1"}`))
+	})
+	if _, err := a.NewSession("proj", "标题"); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if _, present := gotBody["agent_id"]; present {
+		t.Errorf("body carries agent_id = %v; a session must not claim an agent", gotBody["agent_id"])
+	}
+	// The fields it does know must still travel.
+	if gotBody["project"] != "proj" {
+		t.Errorf("body[project] = %v, want %q", gotBody["project"], "proj")
+	}
+	if gotBody["title"] != "标题" {
+		t.Errorf("body[title] = %v, want %q", gotBody["title"], "标题")
+	}
+	if gotBody["company_id"] != "default-company" {
+		t.Errorf("body[company_id] = %v, want %q", gotBody["company_id"], "default-company")
+	}
+}

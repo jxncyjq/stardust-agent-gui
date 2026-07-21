@@ -8,18 +8,21 @@ import { mapSession, groupSessions } from './Sidebar'
 describe('groupSessions', () => {
   it('groups by project without an agent level', () => {
     const tree = groupSessions([
-      { id: 's1', project: 'p', agent: 'default-agent', title: 't1', archived: false, updatedAt: '' },
-      { id: 's2', project: 'p', agent: 'researcher', title: 't2', archived: false, updatedAt: '' },
+      { id: 's1', project: 'p', title: 't1', archived: false, updatedAt: '' },
+      { id: 's2', project: 'p', title: 't2', archived: false, updatedAt: '' },
     ])
 
     expect([...tree.keys()]).toEqual(['p'])
-    // Both sessions sit directly under the project regardless of their agent.
+    // Both sessions sit directly under the project. This used to be asserted by
+    // giving the two fixtures different agents; Session no longer carries an
+    // agent at all, so an agent level is now impossible to build by
+    // construction and the type carries that guarantee.
     expect(tree.get('p')?.map((s) => s.id)).toEqual(['s1', 's2'])
   })
 
   it('falls back to 默认任务 for sessions without a project', () => {
     const tree = groupSessions([
-      { id: 's1', project: '', agent: 'researcher', title: 't1', archived: false, updatedAt: '' },
+      { id: 's1', project: '', title: 't1', archived: false, updatedAt: '' },
     ])
 
     expect(tree.get('默认任务')?.map((s) => s.id)).toEqual(['s1'])

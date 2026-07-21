@@ -195,15 +195,22 @@ func (a *App) ListInbox() ([]map[string]any, error) {
 	return result, nil
 }
 
-// NewSession creates a session for two-level grouping (project -> agent) and
-// returns the created session object. The project is the user-defined top-level
-// group; agent and company default to the single-tenant ids on the backend. The
-// call goes through the Go side to reuse the pooled client and avoid CORS.
+// NewSession creates a session under the user-defined project group and returns
+// the created session object. The call goes through the Go side to reuse the
+// pooled client and avoid CORS.
+//
+// It deliberately sends no agent_id. An agent belongs to a message, not to a
+// session: the agent that answers is chosen per submission and can differ
+// between turns of the same session, which is why replies are labelled
+// individually and the sidebar groups by project only. The previous
+// "default-agent" here was a value the GUI had no basis for — the session record
+// then named an agent that had never answered anything. The server applies its
+// own default for the column; the GUI simply stops asserting what it does not
+// know.
 func (a *App) NewSession(project string, title string) (map[string]any, error) {
 	payload, err := json.Marshal(map[string]string{
 		"project":    strings.TrimSpace(project),
 		"title":      strings.TrimSpace(title),
-		"agent_id":   "default-agent",
 		"company_id": "default-company",
 	})
 	if err != nil {
