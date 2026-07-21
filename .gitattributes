@@ -1,0 +1,60 @@
+# 行尾策略：索引统一 LF，且 checkout 时不做平台转换。
+#
+# 此前仓库无本文件，Windows 上 core.autocrlf=true 会在 checkout 时把文本文件
+# 改写成 CRLF，索引却始终是 LF。由此产生两类问题：
+#   1. `gofmt -l .` 在 Windows 检出上把 CRLF 的 .go 文件全部列出（gofmt 要求
+#      LF），仓库 CLAUDE.md 的门禁「gofmt -l . 为空」因此恒为红；
+#   2. Wails 生成物 frontend/wailsjs/go/main/App.{d.ts,js} 常驻「已修改」，
+#      但 `git diff` 没有任何内容差异 —— 差的只是行尾。
+#
+# 本次归一化不改动任何文件内容 —— 索引本就全是 LF，改的只是 checkout 行为。
+# 因此没有全量行尾提交，git blame 不受影响。
+#
+# 与服务端仓库 legionAgent 的 .gitattributes 保持同一套策略。
+
+* text=auto
+
+# 源码与文本资产强制 LF，不随平台变化。
+*.go       text eol=lf
+*.mod      text eol=lf
+*.sum      text eol=lf
+*.ts       text eol=lf
+*.tsx      text eol=lf
+*.js       text eol=lf
+*.jsx      text eol=lf
+*.css      text eol=lf
+*.html     text eol=lf
+*.json     text eol=lf
+*.md       text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.ps1      text eol=lf
+*.sh       text eol=lf
+*.txt      text eol=lf
+
+# Wails 生成物。构建产物按 LF 写出，跟着源码走，避免常驻伪 diff。
+*.md5      text eol=lf
+
+# 无扩展名的点文件只会匹配到 `* text=auto`，那样仍跟随 core.autocrlf。
+# 显式列出，让规则文件自身也遵守规则。
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# Windows 批处理依赖 CRLF（run.bat 已入库）。
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+
+# 二进制，禁止任何行尾或编码转换。
+*.png      binary
+*.jpg      binary
+*.gif      binary
+*.ico      binary
+*.woff     binary
+*.woff2    binary
+*.ttf      binary
+*.pdf      binary
+*.zip      binary
+*.gz       binary
+*.exe      binary
+*.db       binary
+*.sqlite   binary
