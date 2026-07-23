@@ -11,6 +11,7 @@ import {
   PickDirectory,
   SetSessionWorkingDir,
 } from '../../wailsjs/go/main/App'
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { useChatStore } from '../stores/chatStore'
 import { useSessionStore } from '../stores/sessionStore'
 import { useRunStore } from '../stores/runStore'
@@ -61,12 +62,131 @@ import {
   type SlashCommand,
 } from '../lib/slashCommands'
 
-const POLL_INTERVAL_MS = 600
-const POLL_MAX_ATTEMPTS = 120
+// Polling is the fallback channel now that the wait is SSE-driven, so it runs
+// at a low frequency: it only has to cover an SSE event that was missed (the
+// stream is at-most-once and may drop across a reconnect).
+const POLL_INTERVAL_MS = 3000
+// The wait no longer has a short hard ceiling. The old 120 x 600ms budget gave
+// up after 72s and reported "任务状态: running，暂无结果", which hid a task that
+// was in fact still running on the backend (write_file included) — the exact
+// failure mode that unlimited max_tool_rounds made routine. This bound exists
+// only so a wait cannot leak forever, and hitting it reports the truth.
+const TASK_WAIT_TIMEOUT_MS = 30 * 60 * 1000
 const TERMINAL_STATUSES = ['done', 'failed', 'suspended']
+// Terminal lifecycle events on the SSE stream (serve emits RuntimeEvent types
+// with underscores; the payload carries task_id).
+const TERMINAL_EVENT_TYPES = ['task_completed', 'task_failed']
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+// TaskOutcome is what the UI needs once a submitted task stops running.
+// timedOut is carried explicitly rather than encoded as an empty result: the
+// message shown for it must say the task is still running, not that there is
+// no result.
+type TaskOutcome = {
+  status: string
+  result: string
+  totalTokens: number
+  promptTokens: number
+  completionTokens: number
+  cachedTokens: number
+  timedOut: boolean
+}
+
+// waitForTaskOutcome resolves once the backend reports taskID finished.
+//
+// The primary signal is the SSE stream (serve /v1/events -> sse_bridge.go ->
+// the Wails 'agent:event' channel): a task_completed/task_failed event for
+// this task triggers an immediate GetTaskResult. Polling remains as a
+// fallback because the stream is at-most-once and can drop events across a
+// serve restart or reconnect. onProgress reports the running token total so
+// the caller can update the run indicator while the task is in flight.
+function waitForTaskOutcome(
+  taskID: string,
+  onProgress: (totalTokens: number) => void
+): Promise<TaskOutcome> {
+  return new Promise<TaskOutcome>((resolve, reject) => {
+    let settled = false
+    let cancelSSE: (() => void) | undefined
+    let pollTimer: ReturnType<typeof setInterval> | undefined
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined
+
+    const cleanup = () => {
+      // Unregister via the handle EventsOn returned. EventsOff('agent:event')
+      // would also drop useAgentEvents' listener on the same channel, which
+      // stays mounted for the life of the panel.
+      cancelSSE?.()
+      if (pollTimer !== undefined) clearInterval(pollTimer)
+      if (timeoutTimer !== undefined) clearTimeout(timeoutTimer)
+    }
+    const settle = (outcome: TaskOutcome) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(outcome)
+    }
+    const fail = (err: unknown) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      reject(err)
+    }
+
+    // check reads the authoritative task record. The SSE event is only a
+    // wake-up: the status in storage decides, so an event that arrives before
+    // the record is updated simply leaves the fallback poll to catch it.
+    const check = () => {
+      if (settled) return
+      GetTaskResult(taskID)
+        .then((res: any) => {
+          // A request already in flight when the wait settled must not write
+          // back stale progress.
+          if (settled) return
+          const status = String(res?.status ?? '')
+          const totalTokens = Number(res?.total_tokens ?? 0)
+          onProgress(totalTokens)
+          if (!TERMINAL_STATUSES.includes(status)) return
+          settle({
+            status,
+            result: String(res?.result ?? ''),
+            totalTokens,
+            promptTokens: Number(res?.prompt_tokens ?? 0),
+            completionTokens: Number(res?.completion_tokens ?? 0),
+            cachedTokens: Number(res?.cached_tokens ?? 0),
+            timedOut: false,
+          })
+        })
+        .catch((err: unknown) => {
+          // A result query that fails is not a task that failed; report it as
+          // itself rather than letting the wait hang or pretending it ended.
+          fail(new Error(`查询任务 ${taskID} 结果失败: ${errText(err)}`))
+        })
+    }
+
+    cancelSSE = EventsOn('agent:event', (payload: { type?: string; data?: string }) => {
+      if (settled) return
+      if (!TERMINAL_EVENT_TYPES.includes(String(payload?.type ?? ''))) return
+      let parsed: { task_id?: string }
+      try {
+        parsed = JSON.parse(String(payload?.data ?? ''))
+      } catch (err) {
+        console.error('agent:event payload was not valid JSON:', payload, err)
+        return
+      }
+      if (String(parsed?.task_id ?? '') !== taskID) return
+      check()
+    })
+    pollTimer = setInterval(check, POLL_INTERVAL_MS)
+    timeoutTimer = setTimeout(() => {
+      settle({
+        status: 'timeout',
+        result: '',
+        totalTokens: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        cachedTokens: 0,
+        timedOut: true,
+      })
+    }, TASK_WAIT_TIMEOUT_MS)
+  })
 }
 
 // errText renders an unknown error value as a string for system notices.
@@ -499,32 +619,18 @@ export function ChatPanel() {
     try {
       const taskID = await SubmitTask(prompt, sessionID, pendingImages, agentID)
 
-      let status = ''
-      let result = ''
-      let totalTokens = 0
-      let promptTokens = 0
-      let completionTokens = 0
-      let cachedTokens = 0
-      for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
-        await delay(POLL_INTERVAL_MS)
-        const res = await GetTaskResult(taskID)
-        status = String(res?.status ?? '')
-        result = String(res?.result ?? '')
-        totalTokens = Number(res?.total_tokens ?? 0)
-        promptTokens = Number(res?.prompt_tokens ?? 0)
-        completionTokens = Number(res?.completion_tokens ?? 0)
-        cachedTokens = Number(res?.cached_tokens ?? 0)
+      const { status, result, totalTokens, promptTokens, completionTokens, cachedTokens, timedOut } =
+        await waitForTaskOutcome(taskID, (tokens) => updateRun(sessionID, tokens))
+      if (!timedOut) {
         updateRun(sessionID, totalTokens)
-        if (TERMINAL_STATUSES.includes(status)) break
       }
 
-      const content =
-        result.trim() ||
-        (status === 'failed'
-          ? '任务执行失败，未返回结果。'
-          : status
-            ? `任务状态: ${status}，暂无结果。`
-            : '等待结果超时。')
+      const content = timedOut
+        ? `任务仍在后端运行（前端已等待 ${Math.round(TASK_WAIT_TIMEOUT_MS / 60000)} 分钟未见结束事件）。可在任务面板查看最终结果。`
+        : result.trim() ||
+          (status === 'failed'
+            ? '任务执行失败，未返回结果。'
+            : `任务状态: ${status}，暂无结果。`)
 
       // Only append to the live view if the target session is still the one on
       // screen; otherwise the answer is already persisted as a turn and will
