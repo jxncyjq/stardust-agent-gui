@@ -34,42 +34,90 @@
 
 ---
 
-### Task 1: 重生成 Wails 绑定
+### Task 1: GUI App.ListGateableTools 绑定 + 重生成
+
+**背景更正（server PR #52 已合）：** PR #51 的 `ListGateableTools` 加在了 server `internal/app.App`（错的 App，GUI 够不到），已删。公开 seam 现为 `serve.GateableTools() []serve.GateableTool{Name,Description}`（server master）。GUI 是独立 module，经已 import 的 `github.com/stardust/legion-agent/serve` 调用它。
 
 **Files:**
-- Generate: `frontend/wailsjs/go/main/App.js`、`App.d.ts`、`frontend/wailsjs/go/models.ts`
+- Modify: `app_agents.go`（GUI 根，加 `App.ListGateableTools`）
+- Test: `app_agents_test.go` 或 `app_test.go`（GUI 根）
+- Generate: `frontend/wailsjs/go/main/App.{js,d.ts}`、`frontend/wailsjs/go/models.ts`
 
 **Interfaces:**
+- Consumes: `serve.GateableTools()`（server master）
 - Produces（供 Task 2 import）：`ListGateableTools(): Promise<main.GateableToolDTO[]>`（`frontend/wailsjs/go/main/App`）；`main.GateableToolDTO { name: string; description: string }`（`frontend/wailsjs/go/models`）
 
-- [ ] **Step 1: 重生成绑定**
+- [ ] **Step 1: 写失败测试**（GUI 根 Go 测试）
 
-在 GUI 仓库根运行 wails 绑定生成（不必整包 build）：
-
-```bash
-cd F:/source/stardust/Legion/legion/legionAgentGUI && wails generate module
+```go
+func TestListGateableToolsExposesToolsWithoutMeta(t *testing.T) {
+	got := (&App{}).ListGateableTools()
+	if len(got) == 0 {
+		t.Fatal("ListGateableTools() returned nothing")
+	}
+	var sawWrite bool
+	for _, tl := range got {
+		if tl.Name == "" || tl.Description == "" {
+			t.Errorf("gateable tool missing name/description: %+v", tl)
+		}
+		if tl.Name == "write_file" {
+			sawWrite = true
+		}
+		if tl.Name == "call_tool" || tl.Name == "load_capabilities" {
+			t.Errorf("leaked meta-tool %q", tl.Name)
+		}
+	}
+	if !sawWrite {
+		t.Error("missing write_file")
+	}
+}
 ```
 
-若 `wails generate module` 不可用，则 `run.bat build`（会重生成绑定 + 出 exe）。
+- [ ] **Step 2: 跑测试确认失败**
 
-- [ ] **Step 2: 确认绑定出现**
+`go test ./ -run TestListGateableTools`（GUI 根）→ 方法未定义。
+
+- [ ] **Step 3: 实现**（GUI 根 `app_agents.go`）
+
+```go
+// GateableToolDTO is one tool the per-agent config UI can allow or disable.
+type GateableToolDTO struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// ListGateableTools returns every tool a per-agent config may disable, each with
+// a one-line description, for the tool-authorization checklist. It reads the
+// public serve seam (serve.GateableTools) because this module cannot import
+// legionAgent's internal/toolauth directly. Meta-tools are excluded.
+func (a *App) ListGateableTools() []GateableToolDTO {
+	tools := serve.GateableTools()
+	out := make([]GateableToolDTO, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, GateableToolDTO{Name: t.Name, Description: t.Description})
+	}
+	return out
+}
+```
+
+import `"github.com/stardust/legion-agent/serve"`（GUI 已依赖该包）。
+
+- [ ] **Step 4: 跑测试确认通过 + 重生成绑定**
 
 ```bash
+go test ./ -run TestListGateableTools
+wails generate module
 grep -n "ListGateableTools" frontend/wailsjs/go/main/App.d.ts
 grep -n "GateableToolDTO" frontend/wailsjs/go/models.ts
 ```
 
-预期：`App.d.ts` 有 `export function ListGateableTools():Promise<Array<main.GateableToolDTO>>;`；`models.ts` 有 `GateableToolDTO` 类（含 `name`/`description`）。
+预期绑定出现：`App.d.ts` 有 `ListGateableTools():Promise<Array<main.GateableToolDTO>>`；`models.ts` 有 `GateableToolDTO`。再 `cd frontend && npm run build`（tsc 过，证明绑定 TS 合法）。
 
-- [ ] **Step 3: 门禁**
-
-`cd frontend && npm run build`（tsc 通过，证明绑定 TS 合法）。
-
-- [ ] **Step 4: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
-git add frontend/wailsjs/
-git commit -m "chore(bindings): 重生成 wails 绑定，纳入 ListGateableTools"
+git add app_agents.go app_test.go frontend/wailsjs/
+git commit -m "feat(gui): App.ListGateableTools 经 serve seam 暴露可 gate 工具，重生成绑定"
 ```
 
 ---
