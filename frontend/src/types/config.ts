@@ -9,6 +9,7 @@ export type FieldWidget =
   | 'agents'
   | 'stringlist'
   | 'readonly'
+  | 'tool-checklist'
 
 // FieldSpec describes one editable (or read-only) config field by its dot-path
 // into the agent.json object.

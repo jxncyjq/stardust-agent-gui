@@ -6,6 +6,7 @@ import { SecretField } from './SecretField'
 import { StringListField } from './StringListField'
 import { ProfilesEditor } from './ProfilesEditor'
 import { AgentsEditor } from './AgentsEditor'
+import { ToolChecklistField } from './ToolChecklistField'
 
 // WidgetControl renders the control for a field's widget against a plain
 // value/onChange pair. It is deliberately store-agnostic so the same widget set
@@ -45,6 +46,8 @@ function WidgetControl({
       return <ProfilesEditor value={value} onChange={onChange} />
     case 'agents':
       return <AgentsEditor value={value} onChange={onChange} />
+    case 'tool-checklist':
+      return <ToolChecklistField value={value} onChange={onChange} />
     case 'readonly':
       return <ReadonlyControl value={value} />
     default:
