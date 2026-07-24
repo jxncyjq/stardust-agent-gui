@@ -74,6 +74,7 @@ export const CONFIG_SECTIONS: SectionSpec[] = [
       { path: 'runtime.demo_response', label: 'demo_response', widget: 'text' },
       { path: 'runtime.max_tool_rounds', label: 'max_tool_rounds', widget: 'number' },
       { path: 'runtime.lazy_tools', label: 'lazy_tools', widget: 'toggle' },
+      { path: 'runtime.disabled_tools', label: 'disabled_tools', widget: 'tool-checklist' },
     ],
   },
   {
