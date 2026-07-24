@@ -14,6 +14,20 @@ export namespace main {
 	        this.content = source["content"];
 	    }
 	}
+	export class GateableToolDTO {
+	    name: string;
+	    description: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GateableToolDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.description = source["description"];
+	    }
+	}
 
 }
 

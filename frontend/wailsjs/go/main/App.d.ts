@@ -26,6 +26,8 @@ export function ListAgents():Promise<Array<string>>;
 
 export function ListAuditEvents():Promise<Array<Record<string, any>>>;
 
+export function ListGateableTools():Promise<Array<main.GateableToolDTO>>;
+
 export function ListInbox():Promise<Array<Record<string, any>>>;
 
 export function ListPendingApprovals():Promise<Array<Record<string, any>>>;

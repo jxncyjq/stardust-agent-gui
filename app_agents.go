@@ -6,7 +6,29 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/stardust/legion-agent/serve"
 )
+
+// GateableToolDTO is one tool the per-agent config UI can allow or disable.
+type GateableToolDTO struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// ListGateableTools returns every tool a per-agent config may disable, each with
+// a one-line description, for the tool-authorization checklist. It reads the
+// public serve seam (serve.GateableTools) because this module cannot import
+// legionAgent's internal/toolauth directly. Meta-tools are excluded — they are
+// always resident and cannot be disabled.
+func (a *App) ListGateableTools() []GateableToolDTO {
+	tools := serve.GateableTools()
+	out := make([]GateableToolDTO, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, GateableToolDTO{Name: t.Name, Description: t.Description})
+	}
+	return out
+}
 
 // AgentConfigResult carries a sub-agent config file's contents to the frontend.
 // Exists distinguishes a file that is simply not there yet — the legitimate
