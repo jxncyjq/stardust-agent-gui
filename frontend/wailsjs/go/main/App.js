@@ -50,6 +50,10 @@ export function ListAuditEvents() {
   return window['go']['main']['App']['ListAuditEvents']();
 }
 
+export function ListGateableTools() {
+  return window['go']['main']['App']['ListGateableTools']();
+}
+
 export function ListInbox() {
   return window['go']['main']['App']['ListInbox']();
 }
