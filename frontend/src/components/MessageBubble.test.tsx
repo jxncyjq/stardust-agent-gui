@@ -50,3 +50,26 @@ describe('MessageBubble copy affordance', () => {
     expect(screen.queryByRole('button', { name: '下载为 Markdown' })).not.toBeInTheDocument()
   })
 })
+
+describe('MessageBubble code highlighting', () => {
+  // A fenced code block must render Shiki's tokenised output, not react-markdown's
+  // bare <pre>. Shiki emits <pre class="shiki ..."> with per-token colored spans.
+  it('highlights a fenced code block with Shiki', () => {
+    const md = '```ts\nconst x: number = 1\n```'
+    const { container } = render(
+      <MessageBubble message={{ id: 'a1', role: 'assistant', content: md }} />
+    )
+    const pre = container.querySelector('pre.shiki')
+    expect(pre).not.toBeNull()
+    // Tokenisation produced inline-styled color spans (not one flat text node).
+    expect(pre!.querySelectorAll('span[style*="color"]').length).toBeGreaterThan(0)
+  })
+
+  it('leaves plain prose untouched (no shiki wrapper on non-code)', () => {
+    const { container } = render(
+      <MessageBubble message={{ id: 'a2', role: 'assistant', content: 'hello **world**' }} />
+    )
+    expect(container.querySelector('pre.shiki')).toBeNull()
+    expect(container.querySelector('strong')?.textContent).toBe('world')
+  })
+})

@@ -178,6 +178,13 @@ input[type="checkbox"] {
   cursor: pointer;
 }
 
+/* Shiki dual-theme: default vars are light; under .dark swap to the dark set. */
+.dark .shiki,
+.dark .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}
+
 /* Respect the OS "reduce motion" setting: hold animations still and make
    transitions effectively instant for users who opt out. */
 @media (prefers-reduced-motion: reduce) {
