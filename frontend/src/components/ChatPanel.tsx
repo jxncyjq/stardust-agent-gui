@@ -582,8 +582,12 @@ export function ChatPanel() {
     // next message starts fresh. An empty array is sent for a text-only message,
     // preserving the original behaviour.
     const pendingImages = images
-    const userContent = pendingImages.length > 0 ? `${prompt}\n[附图 ${pendingImages.length} 张]` : prompt
-    addMessage({ id: `user-${Date.now()}`, role: 'user', content: userContent })
+    addMessage({
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: prompt,
+      ...(pendingImages.length > 0 ? { images: pendingImages } : {}),
+    })
     setInput('')
     setImages([])
 

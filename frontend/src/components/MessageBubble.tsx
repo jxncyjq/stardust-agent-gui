@@ -80,7 +80,21 @@ export function MessageBubble({ message }: Props) {
           </ReactMarkdown>
         </div>
       ) : (
-        <p className="whitespace-pre-wrap">{message.content}</p>
+        <>
+          <p className="whitespace-pre-wrap">{message.content}</p>
+          {message.images && message.images.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {message.images.map((src, i) => (
+                <img
+                  key={i}
+                  src={src}
+                  alt={`附图 ${i + 1}`}
+                  className="h-16 w-16 rounded-md object-cover border border-border"
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* A prompt is as worth copying as a reply — re-sending a tweaked version
