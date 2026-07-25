@@ -205,6 +205,41 @@ describe('ChatPanel working-directory picker', () => {
 // These tests run on fake timers and submit with fireEvent rather than
 // userEvent: the point of each assertion is *which* clock tick produced the
 // answer, so no timer may advance except where the test advances it.
+// Task 2 (batch 2): the picked images must ride along on the user message
+// itself (Message.images from Task 1), not just get funneled straight into
+// SubmitTask — otherwise the message bubble has nothing to render and the
+// caller falls back to a placeholder string.
+describe('ChatPanel sends images on the message', () => {
+  it('stores the sent images on the user message and drops the [附图] placeholder', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-img')
+    mocks.GetTaskResult.mockResolvedValue({ status: 'done', result: 'ok' })
+    const user = userEvent.setup()
+    render(<ChatPanel />)
+
+    // Pick one image via the hidden file input (accept image/*, multiple).
+    const file = new File(['x'], 'a.png', { type: 'image/png' })
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    await user.upload(input, file)
+
+    // readFileAsDataURL is async (FileReader.readAsDataURL): wait for the
+    // thumbnail preview to actually render before sending, otherwise
+    // pendingImages would still be empty when sendMessage snapshots it.
+    await waitFor(() => {
+      expect(screen.getByAltText('已选图片 1')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByPlaceholderText(/输入消息/), '看这个')
+    await user.click(screen.getByRole('button', { name: '发送消息' }))
+
+    await waitFor(() => expect(mocks.SubmitTask).toHaveBeenCalled())
+    const userMsg = useChatStore.getState().messages.find((m) => m.role === 'user')!
+    expect(userMsg.images?.length).toBe(1)
+    expect(userMsg.content).toBe('看这个') // 纯 prompt，无 [附图 N 张] 占位
+    expect(userMsg.content).not.toContain('附图')
+  })
+})
+
 describe('ChatPanel task-outcome wait', () => {
   beforeEach(() => {
     vi.useFakeTimers()
