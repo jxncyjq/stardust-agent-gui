@@ -4,6 +4,7 @@ import { ChatPanel } from './components/ChatPanel'
 import { StatusPanel } from './components/StatusPanel'
 import { ConnectionBadge } from './components/ConnectionBadge'
 import { SettingsModal } from './components/settings/SettingsModal'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import { useUIStore } from './stores/uiStore'
 import { useThemeStore } from './stores/themeStore'
 import { SunIcon, MoonIcon } from './components/icons'
@@ -44,6 +45,7 @@ function App() {
         />
       </div>
       <SettingsModal open={settingsOpen} onClose={closeSettings} />
+      <ConfirmDialog />
     </div>
   )
 }
