@@ -26,4 +26,16 @@ describe('confirmStore', () => {
     expect(r.cancelLabel).toBe('取消')
     expect(r.danger).toBe(false)
   })
+
+  it('a second confirm supersedes the first, resolving the first to false', async () => {
+    const first = confirm({ title: 't1', message: 'm1' })
+    const second = confirm({ title: 't2', message: 'm2' })
+    // 第一个被顶掉 → resolve false，不泄漏
+    await expect(first).resolves.toBe(false)
+    // store 现在展示的是第二个
+    expect(useConfirmStore.getState().request?.title).toBe('t2')
+    // 第二个正常接受 → true
+    useConfirmStore.getState().accept()
+    await expect(second).resolves.toBe(true)
+  })
 })
