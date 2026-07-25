@@ -27,6 +27,10 @@ export interface Message {
   // so one session can legitimately hold replies from different agents.
   // Undefined for user/system messages and for history predating the field.
   agent?: string
+  // images carries the data-URI attachments the user sent with this message, so
+  // the bubble can replay them in-session. Optional and absent on assistant/
+  // system messages and on history predating this field.
+  images?: string[]
 }
 
 interface ChatState {

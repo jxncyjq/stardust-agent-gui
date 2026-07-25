@@ -73,3 +73,23 @@ describe('MessageBubble code highlighting', () => {
     expect(container.querySelector('strong')?.textContent).toBe('world')
   })
 })
+
+describe('MessageBubble image attachments', () => {
+  it('renders attached images of a user message', () => {
+    const imgs = ['data:image/png;base64,AAA', 'data:image/png;base64,BBB']
+    render(<MessageBubble message={{ id: 'u1', role: 'user', content: '看这个', images: imgs }} />)
+    const rendered = screen.getAllByRole('img')
+    expect(rendered).toHaveLength(2)
+    expect(rendered.map((el) => el.getAttribute('src'))).toEqual(imgs)
+  })
+
+  it('renders no img when a message has no images', () => {
+    render(<MessageBubble message={{ id: 'u2', role: 'user', content: 'hi' }} />)
+    expect(screen.queryByRole('img')).toBeNull()
+  })
+
+  it('still shows the text content alongside images', () => {
+    render(<MessageBubble message={{ id: 'u3', role: 'user', content: '看这个', images: ['data:image/png;base64,AAA'] }} />)
+    expect(screen.getByText('看这个')).toBeInTheDocument()
+  })
+})
