@@ -2,6 +2,7 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '../lib/utils'
+import { rehypeShikiPlugin } from '../lib/highlighter'
 import type { Message } from '../stores/chatStore'
 import { TerminalIcon, CopyIcon, DownloadIcon } from './icons'
 
@@ -74,7 +75,7 @@ export function MessageBubble({ message }: Props) {
       {isAssistant ? (
         // react-markdown v10 dropped the `className` prop; wrap instead.
         <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:bg-background prose-pre:text-foreground prose-table:my-2 prose-headings:mt-3 prose-headings:mb-1">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeShikiPlugin]}>
             {message.content || (message.streaming ? '▋' : '')}
           </ReactMarkdown>
         </div>

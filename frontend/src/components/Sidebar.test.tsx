@@ -1,5 +1,25 @@
-import { describe, it, expect } from 'vitest'
-import { mapSession, groupSessions } from './Sidebar'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+
+// vi.mock() factories are hoisted above imports/top-level consts, so the mock
+// objects must be built with vi.hoisted() (see ChatPanel.test.tsx).
+const mocks = vi.hoisted(() => ({
+  ListSessions: vi.fn(),
+  NewSession: vi.fn(),
+  RenameSession: vi.fn(),
+  DeleteSession: vi.fn(),
+  SetSessionArchived: vi.fn(),
+  RenameProject: vi.fn(),
+  DeleteProject: vi.fn(),
+  SetProjectArchived: vi.fn(),
+}))
+vi.mock('../../wailsjs/go/main/App', () => mocks)
+
+const confirmMock = vi.hoisted(() => vi.fn())
+vi.mock('../stores/confirmStore', () => ({ confirm: confirmMock }))
+
+import { Sidebar, mapSession, groupSessions } from './Sidebar'
+import { useSessionStore } from '../stores/sessionStore'
 
 // The sidebar groups by project only. A session's agent_id is frozen at
 // creation while the answering agent is picked per submission, so an agent
@@ -56,5 +76,43 @@ describe('mapSession', () => {
   it('leaves workingDir undefined when the backend omits working_dir', () => {
     const session = mapSession({ id: 's1', project: 'p', agent_id: 'a', title: 't' })
     expect(session?.workingDir).toBeUndefined()
+  })
+})
+
+// Deleting a session goes through the self-drawn ConfirmDialog (confirmStore)
+// instead of window.confirm, so it must actually await the resolved choice
+// before calling DeleteSession.
+describe('Sidebar delete session confirmation', () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach((fn) => fn.mockReset())
+    confirmMock.mockReset()
+    mocks.ListSessions.mockResolvedValue([
+      { id: 's1', project: 'p', title: 'Session One' },
+    ])
+    useSessionStore.setState({ sessions: [], currentSessionId: '' })
+  })
+
+  async function openDeleteMenuForSession() {
+    render(<Sidebar />)
+    const row = await screen.findByText('Session One')
+    fireEvent.contextMenu(row)
+    return screen.findByText('删除')
+  }
+
+  it('deletes a session only after confirm resolves true', async () => {
+    confirmMock.mockResolvedValue(true)
+    const deleteItem = await openDeleteMenuForSession()
+    fireEvent.click(deleteItem)
+
+    await waitFor(() => expect(mocks.DeleteSession).toHaveBeenCalledWith('s1'))
+  })
+
+  it('does not delete when confirm resolves false', async () => {
+    confirmMock.mockResolvedValue(false)
+    const deleteItem = await openDeleteMenuForSession()
+    fireEvent.click(deleteItem)
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalled())
+    expect(mocks.DeleteSession).not.toHaveBeenCalled()
   })
 })

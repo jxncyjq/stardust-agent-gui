@@ -5,6 +5,7 @@ import { FieldRenderer } from './fields/FieldRenderer'
 import { ListTasks } from '../../../wailsjs/go/main/App'
 import { XIcon, ChevronDownIcon, ChevronRightIcon, SpinnerIcon } from '../icons'
 import { useUIStore } from '../../stores/uiStore'
+import { confirm, useConfirmStore } from '../../stores/confirmStore'
 import { AgentConfigPage } from './AgentConfigPage'
 
 // activeTaskCount returns how many tracked tasks are still in a non-terminal
@@ -53,11 +54,28 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
+  useEffect(() => {
+    if (!open) return
+    function onKeyDown(e: KeyboardEvent) {
+      // A confirm dialog opened over this modal (e.g. save-restart warning) owns
+      // Esc first; closing the settings modal underneath it would be wrong.
+      if (useConfirmStore.getState().request) return
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [open, onClose])
+
   if (!open) return null
 
   async function onSave() {
     const n = await activeTaskCount()
-    if (n > 0 && !window.confirm(`有 ${n} 个进行中的任务。保存会重启内嵌服务并中断它们，继续？`)) {
+    if (n > 0 && !(await confirm({
+      title: '保存并重启',
+      message: `有 ${n} 个进行中的任务。保存会重启内嵌服务并中断它们，继续？`,
+      confirmLabel: '保存并重启',
+      danger: true,
+    }))) {
       return
     }
     try {
@@ -71,7 +89,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
       <div
-        className="bg-background border border-border rounded-lg shadow-xl w-[720px] max-h-[80vh] flex flex-col"
+        className="bg-background border border-border rounded-lg shadow-xl w-full max-w-[720px] mx-4 max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-2 border-b border-border">

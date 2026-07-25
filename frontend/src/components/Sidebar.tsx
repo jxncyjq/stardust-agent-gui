@@ -11,6 +11,7 @@ import {
 } from '../../wailsjs/go/main/App'
 import { useSessionStore, type Session } from '../stores/sessionStore'
 import { useUIStore } from '../stores/uiStore'
+import { confirm } from '../stores/confirmStore'
 import { SettingsIcon, PlusIcon, ChevronDownIcon, ChevronRightIcon } from './icons'
 import { cn } from '../lib/utils'
 import { ContextMenu, type ContextMenuItem } from './ContextMenu'
@@ -154,7 +155,12 @@ export function Sidebar() {
         label: '删除',
         destructive: true,
         onSelect: async () => {
-          if (!window.confirm(`确认删除会话「${session.title || session.id}」？此操作不可撤销。`)) {
+          if (!(await confirm({
+            title: '删除会话',
+            message: `确认删除会话「${session.title || session.id}」？此操作不可撤销。`,
+            confirmLabel: '删除',
+            danger: true,
+          }))) {
             return
           }
           try {
@@ -189,7 +195,12 @@ export function Sidebar() {
         label: '删除整组',
         destructive: true,
         onSelect: async () => {
-          if (!window.confirm(`确认删除项目「${project}」下的全部会话？此操作不可撤销。`)) {
+          if (!(await confirm({
+            title: '删除项目',
+            message: `确认删除项目「${project}」下的全部会话？此操作不可撤销。`,
+            confirmLabel: '删除',
+            danger: true,
+          }))) {
             return
           }
           try {
