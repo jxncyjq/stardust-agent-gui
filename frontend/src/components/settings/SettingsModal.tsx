@@ -5,6 +5,7 @@ import { FieldRenderer } from './fields/FieldRenderer'
 import { ListTasks } from '../../../wailsjs/go/main/App'
 import { XIcon, ChevronDownIcon, ChevronRightIcon, SpinnerIcon } from '../icons'
 import { useUIStore } from '../../stores/uiStore'
+import { confirm } from '../../stores/confirmStore'
 import { AgentConfigPage } from './AgentConfigPage'
 
 // activeTaskCount returns how many tracked tasks are still in a non-terminal
@@ -57,7 +58,12 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
 
   async function onSave() {
     const n = await activeTaskCount()
-    if (n > 0 && !window.confirm(`有 ${n} 个进行中的任务。保存会重启内嵌服务并中断它们，继续？`)) {
+    if (n > 0 && !(await confirm({
+      title: '保存并重启',
+      message: `有 ${n} 个进行中的任务。保存会重启内嵌服务并中断它们，继续？`,
+      confirmLabel: '保存并重启',
+      danger: true,
+    }))) {
       return
     }
     try {
