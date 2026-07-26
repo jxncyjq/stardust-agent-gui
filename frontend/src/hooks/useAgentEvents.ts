@@ -1,39 +1,20 @@
 import { useEffect } from 'react'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import { ServeStatus } from '../../wailsjs/go/main/App'
-import { useChatStore } from '../stores/chatStore'
 import { useServeStore } from '../stores/serveStore'
 import { useApprovalStore } from '../stores/approvalStore'
 
+// useAgentEvents wires the panel-lifetime SSE channels that are not owned by a
+// single in-flight task: the serve status badge and the approval queue. The
+// chat token stream is deliberately not handled here — a task's streaming
+// bubble is reconciled inside ChatPanel.waitForTaskOutcome, which holds the
+// taskID and can attribute each delta to the right bubble. A listener here
+// could not, and would double-append.
 export function useAgentEvents() {
-  const appendToken = useChatStore((s) => s.appendToken)
   const setStatus = useServeStore((s) => s.setStatus)
 
   useEffect(() => {
-    let currentStreamId = ''
     let cancelled = false
-
-    const handleToken = (data: string) => {
-      if (!currentStreamId) {
-        currentStreamId = `stream-${Date.now()}`
-        useChatStore.getState().addMessage({
-          id: currentStreamId,
-          role: 'assistant',
-          content: '',
-          streaming: true,
-        })
-      }
-      appendToken(currentStreamId, data)
-    }
-
-    const handleEvent = (payload: { type: string }) => {
-      if (payload.type === 'runtime.done' || payload.type === 'done') {
-        if (currentStreamId) {
-          useChatStore.getState().finalizeMessage(currentStreamId)
-          currentStreamId = ''
-        }
-      }
-    }
 
     const handleStatus = (status: { running: boolean; port: number }) => {
       setStatus(status.running, status.port)
@@ -60,8 +41,6 @@ export function useAgentEvents() {
       }
     }
 
-    EventsOn('agent:token', handleToken)
-    EventsOn('agent:event', handleEvent)
     EventsOn('serve:status', handleStatus)
     EventsOn('agent:approval', handleApproval)
 
@@ -97,10 +76,8 @@ export function useAgentEvents() {
 
     return () => {
       cancelled = true
-      EventsOff('agent:token')
-      EventsOff('agent:event')
       EventsOff('serve:status')
       EventsOff('agent:approval')
     }
-  }, [appendToken, setStatus])
+  }, [setStatus])
 }

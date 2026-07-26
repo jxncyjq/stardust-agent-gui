@@ -98,29 +98,49 @@ type TaskOutcome = {
   timedOut: boolean
 }
 
+// StreamingOutcome adds the id of the streamed assistant bubble, when one was
+// created. It is present only if at least one token delta for this task arrived
+// (a streaming provider on the main runtime path); for a non-streaming provider
+// — or if every delta was dropped — it is undefined and the caller appends the
+// reply from GetTaskResult instead (backward-compatible fallback).
+type StreamingOutcome = TaskOutcome & { streamedId?: string }
+
 // waitForTaskOutcome resolves once the backend reports taskID finished.
 //
-// The primary signal is the SSE stream (serve /v1/events -> sse_bridge.go ->
-// the Wails 'agent:event' channel): a task_completed/task_failed event for
-// this task triggers an immediate GetTaskResult. Polling remains as a
-// fallback because the stream is at-most-once and can drop events across a
-// serve restart or reconnect. onProgress reports the running token total so
-// the caller can update the run indicator while the task is in flight.
+// The primary terminal signal is the SSE stream (serve /v1/events ->
+// sse_bridge.go -> the Wails 'agent:event' channel): a task_completed/
+// task_failed event for this task triggers an immediate GetTaskResult. Polling
+// remains as a fallback because the stream is at-most-once and can drop events
+// across a serve restart or reconnect. onProgress reports the running token
+// total so the caller can update the run indicator while the task is in flight.
+//
+// It also owns the streaming chat bubble for this task (single point managing
+// stream + finalize + usage, per the A1 design): token deltas on the dedicated
+// 'agent:token' channel create one assistant bubble and accumulate into it. The
+// caller finalizes that bubble (stops the spinner, attaches usage) using the
+// returned streamedId, so the streamed text is the final message and
+// GetTaskResult is used only for usage — never appended as a second bubble.
 function waitForTaskOutcome(
   taskID: string,
+  sessionID: string,
+  agentID: string,
   onProgress: (totalTokens: number) => void
-): Promise<TaskOutcome> {
-  return new Promise<TaskOutcome>((resolve, reject) => {
+): Promise<StreamingOutcome> {
+  return new Promise<StreamingOutcome>((resolve, reject) => {
     let settled = false
     let cancelSSE: (() => void) | undefined
+    let cancelToken: (() => void) | undefined
     let pollTimer: ReturnType<typeof setInterval> | undefined
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined
+    // The streamed bubble's id, set on the first token delta for this task.
+    let streamedId: string | undefined
 
     const cleanup = () => {
       // Unregister via the handle EventsOn returned. EventsOff('agent:event')
       // would also drop useAgentEvents' listener on the same channel, which
       // stays mounted for the life of the panel.
       cancelSSE?.()
+      cancelToken?.()
       if (pollTimer !== undefined) clearInterval(pollTimer)
       if (timeoutTimer !== undefined) clearTimeout(timeoutTimer)
     }
@@ -128,12 +148,15 @@ function waitForTaskOutcome(
       if (settled) return
       settled = true
       cleanup()
-      resolve(outcome)
+      resolve({ ...outcome, streamedId })
     }
     const fail = (err: unknown) => {
       if (settled) return
       settled = true
       cleanup()
+      // A streamed bubble must not be left spinning forever when the wait errors
+      // out; stop it so the partial text it holds reads as finished.
+      if (streamedId) useChatStore.getState().finalizeMessage(streamedId)
       reject(err)
     }
 
@@ -181,6 +204,23 @@ function waitForTaskOutcome(
       if (String(parsed?.task_id ?? '') !== taskID) return
       check()
     })
+
+    // Token deltas for this task build the streaming assistant bubble. The first
+    // matching delta creates the bubble; the rest accumulate into it. Deltas for
+    // other tasks are ignored, and deltas that land while the user has switched
+    // to a different session are dropped rather than appended to the wrong view
+    // (the reply is still persisted as a turn and replays on switch-back).
+    cancelToken = EventsOn('agent:token', (payload: { task_id?: string; message?: string }) => {
+      if (settled) return
+      if (String(payload?.task_id ?? '') !== taskID) return
+      if (useSessionStore.getState().currentSessionId !== sessionID) return
+      const store = useChatStore.getState()
+      if (!streamedId) {
+        streamedId = `assistant-${taskID}`
+        store.addMessage({ id: streamedId, role: 'assistant', content: '', streaming: true, agent: agentID })
+      }
+      store.appendToken(streamedId, String(payload?.message ?? ''))
+    })
     pollTimer = setInterval(check, POLL_INTERVAL_MS)
     timeoutTimer = setTimeout(() => {
       settle({
@@ -206,6 +246,7 @@ export function ChatPanel() {
 
   const messages = useChatStore((s) => s.messages)
   const addMessage = useChatStore((s) => s.addMessage)
+  const updateMessage = useChatStore((s) => s.updateMessage)
   const clearMessages = useChatStore((s) => s.clearMessages)
   const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const setCurrentSession = useSessionStore((s) => s.setCurrentSession)
@@ -633,8 +674,8 @@ export function ChatPanel() {
     try {
       const taskID = await SubmitTask(prompt, sessionID, pendingImages, agentID)
 
-      const { status, result, totalTokens, promptTokens, completionTokens, cachedTokens, timedOut } =
-        await waitForTaskOutcome(taskID, (tokens) => updateRun(sessionID, tokens))
+      const { status, result, totalTokens, promptTokens, completionTokens, cachedTokens, timedOut, streamedId } =
+        await waitForTaskOutcome(taskID, sessionID, agentID, (tokens) => updateRun(sessionID, tokens))
       if (!timedOut) {
         updateRun(sessionID, totalTokens)
       }
@@ -646,23 +687,48 @@ export function ChatPanel() {
             ? '任务执行失败，未返回结果。'
             : `任务状态: ${status}，暂无结果。`)
 
-      // Only append to the live view if the target session is still the one on
+      // Only touch the live view if the target session is still the one on
       // screen; otherwise the answer is already persisted as a turn and will
       // reappear when the user switches back.
       if (useSessionStore.getState().currentSessionId === sessionID) {
-        addMessage({
-          id: `assistant-${taskID}`,
-          role: 'assistant',
-          content,
-          agent: agentID,
-          meta: {
-            elapsedSec: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
-            promptTokens,
-            completionTokens,
-            cachedTokens,
-            totalTokens,
-          },
-        })
+        const meta = {
+          elapsedSec: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
+          promptTokens,
+          completionTokens,
+          cachedTokens,
+          totalTokens,
+        }
+        // The streamed bubble is the final message only if it still exists: a
+        // mid-stream session switch (loadHistory -> clearMessages) can wipe it
+        // while streamedId still points at the gone id, and updateMessage would
+        // then silently no-op, dropping the reply from the live view. So key on
+        // the bubble actually being present, not just on streamedId being set.
+        const bubblePresent =
+          streamedId !== undefined &&
+          useChatStore.getState().messages.some((m) => m.id === streamedId)
+        if (bubblePresent) {
+          // Finalize in place: the streamed text is the reply, so nothing is
+          // appended. Attach usage meta only when the task actually completed
+          // (a timeout carries no usage).
+          updateMessage(streamedId!, { streaming: false, agent: agentID, ...(timedOut ? {} : { meta }) })
+          if (timedOut) {
+            // The finalized bubble alone cannot convey "still running"; surface
+            // the same notice the non-streaming path shows rather than dropping
+            // the truth. Distinct id so it does not collide with the bubble.
+            addMessage({ id: `assistant-timeout-${taskID}`, role: 'assistant', content, agent: agentID, meta })
+          }
+        } else {
+          // No streamed bubble survives: a non-streaming provider (no token ever
+          // arrived) or a bubble wiped by a session switch. Either way, append
+          // the reply from GetTaskResult so the live view still shows it.
+          addMessage({
+            id: `assistant-${taskID}`,
+            role: 'assistant',
+            content,
+            agent: agentID,
+            meta,
+          })
+        }
       }
     } catch (err) {
       if (useSessionStore.getState().currentSessionId === sessionID) {

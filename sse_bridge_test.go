@@ -8,6 +8,27 @@ import (
 	"testing"
 )
 
+// emittedEvent is one (event, data) pair captured from consumeSSE's emit hook.
+type emittedEvent struct {
+	event string
+	data  any
+}
+
+// collectSSE runs one consumeSSE attempt against url and returns everything it
+// emitted. The stream always ends in an error (the server closes the body), so
+// a nil error is itself a failure worth reporting.
+func collectSSE(t *testing.T, url string) []emittedEvent {
+	t.Helper()
+	var got []emittedEvent
+	emit := func(event string, data any) {
+		got = append(got, emittedEvent{event: event, data: data})
+	}
+	if err := consumeSSE(context.Background(), url, emit); err == nil {
+		t.Fatal("consumeSSE returned nil error; want a non-nil error describing why the stream ended")
+	}
+	return got
+}
+
 // TestConsumeSSEEmitsApprovalEvents verifies that consumeSSE, upon receiving
 // approval_pending/approval_resolved SSE frames, emits both the generic
 // "agent:event" channel (unchanged prior behaviour) and the dedicated
@@ -78,14 +99,15 @@ func TestConsumeSSEEmitsApprovalEvents(t *testing.T) {
 	}
 }
 
-// TestConsumeSSEEmitsTokenEvents verifies the pre-existing token dedicated
-// channel still fires alongside the generic channel, so the approval routing
-// added in this change does not regress it.
+// TestConsumeSSEEmitsTokenEvents verifies a token SSE frame (whose data is a
+// RuntimeEvent JSON envelope, not bare text) is unmarshalled and re-emitted on
+// the dedicated agent:token channel as a {task_id, message} object, so the GUI
+// can attribute each delta to the task whose bubble it belongs to.
 func TestConsumeSSEEmitsTokenEvents(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "event: runtime.token\ndata: hi\n\n")
+		fmt.Fprint(w, "event: token\ndata: {\"type\":\"token\",\"task_id\":\"task-9\",\"message\":\"hi\"}\n\n")
 	}))
 	defer srv.Close()
 
@@ -93,8 +115,15 @@ func TestConsumeSSEEmitsTokenEvents(t *testing.T) {
 	emit := func(event string, data any) {
 		if event == "agent:token" {
 			tokenSeen = true
-			if data != "hi" {
-				t.Errorf("agent:token data = %v, want %q", data, "hi")
+			m, ok := data.(map[string]any)
+			if !ok {
+				t.Fatalf("agent:token data not a map: %#v", data)
+			}
+			if m["task_id"] != "task-9" {
+				t.Errorf("agent:token task_id = %v, want %q", m["task_id"], "task-9")
+			}
+			if m["message"] != "hi" {
+				t.Errorf("agent:token message = %v, want %q", m["message"], "hi")
 			}
 		}
 	}
@@ -103,7 +132,25 @@ func TestConsumeSSEEmitsTokenEvents(t *testing.T) {
 		t.Fatal("consumeSSE returned nil error; want a non-nil error describing why the stream ended")
 	}
 	if !tokenSeen {
-		t.Error("agent:token was not emitted for a runtime.token SSE event")
+		t.Error("agent:token was not emitted for a token SSE event")
+	}
+}
+
+// TestConsumeSSESkipsNonJSONTokenPayload verifies a token frame whose data is
+// not a valid JSON envelope is skipped (fail-loud to stderr) rather than fed to
+// the chat bubble as bare text: a malformed payload must not corrupt the stream.
+func TestConsumeSSESkipsNonJSONTokenPayload(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "event: token\ndata: not-json\n\n")
+	}))
+	defer srv.Close()
+
+	for _, e := range collectSSE(t, srv.URL) {
+		if e.event == "agent:token" {
+			t.Errorf("agent:token should not be emitted for a non-JSON token payload, got %#v", e.data)
+		}
 	}
 }
 

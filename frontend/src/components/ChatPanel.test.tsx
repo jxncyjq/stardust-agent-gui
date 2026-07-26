@@ -52,6 +52,13 @@ function emitAgentEvent(payload: { type: string; data: string }) {
   for (const cb of runtimeMocks.listeners['agent:event'] ?? []) cb(payload)
 }
 
+// emitAgentToken replays one token delta exactly as sse_bridge.go emits it on
+// the dedicated channel after unmarshalling the RuntimeEvent envelope: an
+// {task_id, message} object (not a bare string).
+function emitAgentToken(payload: { task_id: string; message: string }) {
+  for (const cb of runtimeMocks.listeners['agent:token'] ?? []) cb(payload)
+}
+
 import { ChatPanel } from './ChatPanel'
 import { useSessionStore } from '../stores/sessionStore'
 import { useChatStore } from '../stores/chatStore'
@@ -396,6 +403,140 @@ describe('ChatPanel task-outcome wait', () => {
     const content = lastAssistantContent()
     expect(content).toContain('仍在后端运行')
     expect(content).not.toContain('暂无结果')
+  })
+
+  function assistantMessages() {
+    return useChatStore.getState().messages.filter((m) => m.role === 'assistant')
+  }
+
+  it('streams token deltas into one assistant bubble and finalizes it on task_completed without a second message', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-s')
+    mocks.GetTaskResult.mockResolvedValue({
+      status: 'done',
+      result: '你好世界',
+      total_tokens: 12,
+      prompt_tokens: 8,
+      completion_tokens: 4,
+    })
+    render(<ChatPanel />)
+
+    submit()
+    await flush()
+
+    // Deltas arrive before the terminal event: a single assistant bubble forms
+    // and accumulates, marked streaming while in flight.
+    await act(async () => {
+      emitAgentToken({ task_id: 'task-s', message: '你好' })
+      emitAgentToken({ task_id: 'task-s', message: '世界' })
+    })
+    await flush()
+
+    let assistants = assistantMessages()
+    expect(assistants.length).toBe(1)
+    expect(assistants[0].streaming).toBe(true)
+    expect(assistants[0].content).toBe('你好世界')
+
+    // task_completed finalizes the same bubble (no second message) and attaches
+    // the usage meta pulled from GetTaskResult.
+    await act(async () => {
+      emitAgentEvent({ type: 'task_completed', data: JSON.stringify({ task_id: 'task-s' }) })
+    })
+    await flush()
+
+    assistants = assistantMessages()
+    expect(assistants.length).toBe(1)
+    expect(assistants[0].streaming).toBe(false)
+    expect(assistants[0].content).toBe('你好世界')
+    expect(assistants[0].meta?.totalTokens).toBe(12)
+    expect(assistants[0].meta?.promptTokens).toBe(8)
+    expect(assistants[0].meta?.completionTokens).toBe(4)
+  })
+
+  it('ignores token deltas belonging to another task and falls back to one appended message', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-mine')
+    mocks.GetTaskResult.mockResolvedValue({ status: 'done', result: '我的结果', total_tokens: 3 })
+    render(<ChatPanel />)
+
+    submit()
+    await flush()
+
+    // A delta for a different task must not create a bubble here.
+    await act(async () => {
+      emitAgentToken({ task_id: 'task-other', message: '别人的' })
+    })
+    await flush()
+    expect(assistantMessages().length).toBe(0)
+
+    // With no token of its own, this task takes the non-streaming fallback path:
+    // exactly one assistant message, appended from GetTaskResult.
+    await act(async () => {
+      emitAgentEvent({ type: 'task_completed', data: JSON.stringify({ task_id: 'task-mine' }) })
+    })
+    await flush()
+
+    const assistants = assistantMessages()
+    expect(assistants.length).toBe(1)
+    expect(assistants[0].content).toBe('我的结果')
+    expect(assistants[0].streaming).toBeFalsy()
+  })
+
+  it('re-appends the authoritative reply on completion when a session switch wiped the streaming bubble mid-stream', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-sw')
+    mocks.GetTaskResult.mockResolvedValue({ status: 'done', result: '完整回复', total_tokens: 5 })
+    render(<ChatPanel />)
+
+    submit()
+    await flush()
+    await act(async () => {
+      emitAgentToken({ task_id: 'task-sw', message: '部分' })
+    })
+    await flush()
+    expect(assistantMessages().length).toBe(1)
+
+    // Emulate loadHistory clearing the view on a mid-stream session switch: the
+    // streamed bubble is gone but the wait's streamedId closure still points at
+    // it, so appendToken/updateMessage would silently no-op and the reply would
+    // never reach the live view. On completion the authoritative reply must be
+    // appended instead.
+    act(() => {
+      useChatStore.getState().clearMessages()
+    })
+    await act(async () => {
+      emitAgentEvent({ type: 'task_completed', data: JSON.stringify({ task_id: 'task-sw' }) })
+    })
+    await flush()
+
+    const assistants = assistantMessages()
+    expect(assistants.length).toBe(1)
+    expect(assistants[0].content).toBe('完整回复')
+    expect(assistants[0].streaming).toBeFalsy()
+  })
+
+  it('on timeout with a streamed bubble, finalizes it and still surfaces the still-running notice', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-to')
+    mocks.GetTaskResult.mockResolvedValue({ status: 'running', result: '' })
+    render(<ChatPanel />)
+
+    submit()
+    await flush()
+    await act(async () => {
+      emitAgentToken({ task_id: 'task-to', message: '开始了' })
+    })
+    await flush()
+
+    await advance(30 * 60 * 1000)
+
+    // The streamed bubble stops spinning...
+    const streamed = useChatStore.getState().messages.find((m) => m.id === 'assistant-task-to')
+    expect(streamed?.streaming).toBeFalsy()
+    // ...and the truth that the task is still running on the backend is surfaced,
+    // matching the non-streaming path rather than being silently dropped.
+    const surfaced = useChatStore.getState().messages.some((m) => m.content.includes('仍在后端运行'))
+    expect(surfaced).toBe(true)
   })
 
   it('unregisters its SSE listener with the handle EventsOn returned, not EventsOff', async () => {
