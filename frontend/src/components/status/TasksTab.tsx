@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ListTasks } from '../../../wailsjs/go/main/App'
+import { EventsOn } from '../../../wailsjs/runtime/runtime'
 
 interface TaskItem {
   id: string
@@ -31,8 +32,14 @@ export function TasksTab() {
       }
     }
     refresh()
-    const id = setInterval(refresh, 3000)
-    return () => clearInterval(id)
+    // Event-driven: only task_* events change what this tab renders, so filter
+    // on type before refreshing. The interval drops to a low-frequency fallback
+    // for the rare missed event (SSE is at-most-once).
+    const cancel = EventsOn('agent:event', (p: { type?: string }) => {
+      if (['task_started', 'task_completed', 'task_failed'].includes(String(p?.type ?? ''))) refresh()
+    })
+    const id = setInterval(refresh, 15000)
+    return () => { cancel(); clearInterval(id) }
   }, [])
 
   return (
