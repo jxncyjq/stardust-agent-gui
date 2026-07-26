@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ListAuditEvents } from '../../../wailsjs/go/main/App'
+import { EventsOn } from '../../../wailsjs/runtime/runtime'
 
 interface AuditItem {
   action: string
@@ -31,8 +32,16 @@ export function AuditTab() {
       }
     }
     refresh()
-    const id = setInterval(refresh, 3000)
-    return () => clearInterval(id)
+    const cancel = EventsOn('agent:event', (p: { type?: string }) => {
+      // Heuristic, NOT an event contract: audit records have no dedicated SSE event
+      // (append is a DB write, no Publish). A task reaching a terminal state usually
+      // produces an audit row alongside it, so use task_completed/task_failed as a
+      // best-effort refresh trigger. The interval below still covers audit rows that
+      // have no observable event (e.g. model-level audits).
+      if (['task_completed', 'task_failed'].includes(String(p?.type ?? ''))) refresh()
+    })
+    const id = setInterval(refresh, 8000) // 降频兜底（原 3000）
+    return () => { cancel(); clearInterval(id) }
   }, [])
 
   return (
