@@ -62,6 +62,13 @@ import {
   type SlashCommand,
 } from '../lib/slashCommands'
 
+// A3: cap how many trailing messages are in the DOM at once. The full history
+// lives in chatStore; only the last RENDER_BUDGET render, with a "显示更早"
+// button to reveal older ones on demand. This is a render budget (hermes-style),
+// not virtualization: the newest message is always rendered, so the scroll-to-
+// bottom sentinel (bottomRef) and its logic stay unchanged.
+const RENDER_BUDGET = 150
+
 // Polling is the fallback channel now that the wait is SSE-driven, so it runs
 // at a low frequency: it only has to cover an SSE event that was missed (the
 // stream is at-most-once and may drop across a reconnect).
@@ -238,6 +245,8 @@ export function ChatPanel() {
   // ("data:image/...;base64,...") so they can be sent straight to the backend
   // and previewed inline. Cleared after a successful send.
   const [images, setImages] = useState<string[]>([])
+  // A3: render budget for messages; only the last renderBudget messages are in the DOM.
+  const [renderBudget, setRenderBudget] = useState(RENDER_BUDGET)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -324,6 +333,7 @@ export function ChatPanel() {
     let cancelled = false
     async function loadHistory() {
       clearMessages()
+      setRenderBudget(RENDER_BUDGET)
       if (!currentSessionId) return
       try {
         const turns = await GetSessionTurns(currentSessionId)
@@ -677,7 +687,17 @@ export function ChatPanel() {
         {messages.length === 0 ? (
           <ChatEmptyState />
         ) : (
-          messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
+          <>
+            {messages.length > renderBudget && (
+              <button
+                className="interactive self-center text-xs px-3 py-1 rounded border border-border text-muted-foreground hover:bg-muted"
+                onClick={() => setRenderBudget((b) => b + RENDER_BUDGET)}
+              >
+                显示更早（还有 {messages.length - renderBudget} 条）
+              </button>
+            )}
+            {messages.slice(-renderBudget).map((msg) => <MessageBubble key={msg.id} message={msg} />)}
+          </>
         )}
         <div ref={bottomRef} />
       </div>

@@ -240,6 +240,52 @@ describe('ChatPanel sends images on the message', () => {
   })
 })
 
+describe('ChatPanel message list render budget (A3)', () => {
+  it('renders only the last N messages and offers 显示更早 when over budget (A3)', async () => {
+    seedSession()
+    render(<ChatPanel />)
+
+    // 灌入超过预算条数的消息
+    const many = Array.from({ length: 200 }, (_, i) => ({
+      id: `m${i}`,
+      role: 'assistant' as const,
+      content: `msg ${i}`,
+    }))
+    act(() => {
+      useChatStore.setState({ messages: many })
+    })
+
+    // 只渲染末尾 RENDER_BUDGET(150) 条：最早的 msg 0 不在 DOM，msg 199 在。
+    await waitFor(() => {
+      expect(screen.queryByText('msg 0')).toBeNull()
+    })
+    expect(screen.getByText('msg 199')).toBeInTheDocument()
+    // 有"显示更早"按钮。
+    const earlier = screen.getByRole('button', { name: /显示更早/ })
+    expect(earlier).toBeInTheDocument()
+
+    // 点一次扩大预算 → 更早的消息进入 DOM。
+    const user = userEvent.setup()
+    await user.click(earlier)
+    await waitFor(() => {
+      expect(screen.getByText('msg 0')).toBeInTheDocument()
+    })
+  })
+
+  it('does not show 显示更早 when message count is under budget', async () => {
+    seedSession()
+    render(<ChatPanel />)
+
+    act(() => {
+      useChatStore.setState({ messages: [{ id: 'm1', role: 'assistant' as const, content: 'hi' }] })
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /显示更早/ })).toBeNull()
+    })
+  })
+})
+
 describe('ChatPanel task-outcome wait', () => {
   beforeEach(() => {
     vi.useFakeTimers()
