@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ListRuntimeEvents } from '../../../wailsjs/go/main/App'
+import { EventsOn } from '../../../wailsjs/runtime/runtime'
 
 interface RuntimeEvent {
   type: string
@@ -35,8 +36,12 @@ export function EventsTab() {
       }
     }
     refresh()
-    const id = setInterval(refresh, 3000)
-    return () => clearInterval(id)
+    // Event-driven: every RuntimeEvent that appears on the SSE stream is a new row
+    // here, so refresh on any agent:event. The interval drops to a low-frequency
+    // fallback for the rare missed event (SSE is at-most-once).
+    const cancel = EventsOn('agent:event', () => { refresh() })
+    const id = setInterval(refresh, 15000)
+    return () => { cancel(); clearInterval(id) }
   }, [])
 
   return (

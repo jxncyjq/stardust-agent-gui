@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '../lib/utils'
@@ -33,7 +33,13 @@ function formatK(n: number): string {
   return `${s}k`
 }
 
-export function MessageBubble({ message }: Props) {
+// MessageBubble is memoized: while any session is running, ChatPanel re-renders
+// once a second (the elapsed-time clock), which would otherwise re-run every
+// history message's ReactMarkdown + Shiki highlight every tick. chatStore keeps
+// a stable object reference for messages that did not change (appendToken/
+// finalizeMessage only replace the target id, others pass through), so the
+// default shallow prop compare bails out correctly — no custom comparator.
+export const MessageBubble = memo(function MessageBubble({ message }: Props) {
   const [copied, setCopied] = useState(false)
 
   const copy = async () => {
@@ -145,4 +151,4 @@ export function MessageBubble({ message }: Props) {
       )}
     </div>
   )
-}
+})

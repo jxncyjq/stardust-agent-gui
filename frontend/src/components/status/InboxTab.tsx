@@ -33,6 +33,11 @@ export function InboxTab() {
       }
     }
     refresh()
+    // Inbox stays on a plain 3s poll: agent messaging (SendAgentMessage/HandoffTask)
+    // only writes to the DB and never publishes an event, and messages from OTHER
+    // agents arrive with no local signal at all — so polling is the only channel.
+    // ChatPanel triggers a one-off refresh for the user's own /send and /handoff by
+    // switching to this tab; everything else must be polled.
     const id = setInterval(refresh, 3000)
     return () => clearInterval(id)
   }, [])
