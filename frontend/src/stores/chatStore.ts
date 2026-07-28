@@ -38,6 +38,12 @@ interface ChatState {
   addMessage: (msg: Message) => void
   appendToken: (id: string, token: string) => void
   finalizeMessage: (id: string) => void
+  // updateMessage patches an existing message in place (matched by id). It is
+  // how a streamed assistant bubble is finalized: once task_completed lands, the
+  // bubble is stopped (streaming:false) and its authoritative content + usage
+  // meta are written onto the same message rather than appended as a second one.
+  // A missing id is a no-op.
+  updateMessage: (id: string, patch: Partial<Message>) => void
   clearMessages: () => void
 }
 
@@ -56,6 +62,10 @@ export const useChatStore = create<ChatState>((set) => ({
       messages: s.messages.map((m) =>
         m.id === id ? { ...m, streaming: false } : m
       ),
+    })),
+  updateMessage: (id, patch) =>
+    set((s) => ({
+      messages: s.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)),
     })),
   clearMessages: () => set({ messages: [] }),
 }))

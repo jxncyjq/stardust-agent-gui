@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -110,7 +111,20 @@ func consumeSSE(ctx context.Context, url string, emit func(event string, data an
 				switch eventType {
 				case "runtime.token", "token":
 					// Token events get a dedicated channel for the chat stream.
-					emit("agent:token", data)
+					// The SSE data line is a RuntimeEvent JSON envelope (not bare
+					// text): unmarshal it so the delta can be attributed to its
+					// task, and re-emit the {task_id, message} pair the GUI bubble
+					// reconciliation keys on. A payload that is not that envelope is
+					// skipped fail-loud rather than fed to a bubble as raw JSON.
+					var env struct {
+						TaskID  string `json:"task_id"`
+						Message string `json:"message"`
+					}
+					if err := json.Unmarshal([]byte(data), &env); err != nil {
+						fmt.Fprintf(os.Stderr, "sse bridge: token payload not JSON (%q): %v\n", data, err)
+					} else {
+						emit("agent:token", map[string]any{"task_id": env.TaskID, "message": env.Message})
+					}
 				case "approval_pending", "approval_resolved":
 					// Approval lifecycle events get a dedicated channel so the
 					// approval UI does not have to filter the generic firehose.
