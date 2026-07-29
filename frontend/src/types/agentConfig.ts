@@ -59,7 +59,7 @@ export const AGENT_SECTIONS: SectionSpec[] = [
     title: '工具授权',
     help: '默认全部可用；取消勾选即禁止该 Agent 调用对应工具。元工具（load_capabilities/call_tool）常驻，不在此列。',
     advanced: false,
-    fields: [{ path: 'disabled_tools', label: '可用工具', widget: 'tool-checklist' }],
+    fields: [{ path: 'disabled_tools', label: '可用工具（勾选=允许使用）', widget: 'tool-checklist' }],
   },
 ]
 

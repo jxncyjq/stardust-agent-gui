@@ -65,3 +65,13 @@ it('shows an error when loading the tool list fails', async () => {
   await waitFor(() => expect(screen.getByText(/加载.*失败/)).toBeInTheDocument())
   expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
 })
+
+// The checkbox semantics are the inverse of the underlying field name
+// (disabled_tools), which once led a user to uncheck everything believing that
+// enabled it — disabling every tool instead. Pin the inline explanation.
+it('states that a checked box means the tool is allowed', async () => {
+  render(<ToolChecklistField value={[]} onChange={() => {}} />)
+
+  await screen.findByRole('checkbox', { name: /write_file/ })
+  expect(screen.getByText(/勾选 = 允许/)).toBeInTheDocument()
+})
