@@ -54,6 +54,13 @@ export function ToolChecklistField({
 
   return (
     <div className="flex flex-col gap-1">
+      {/* The underlying field is a deny-list (disabled_tools) but the checkbox
+          reads the other way round — checked means the tool is allowed. Say so
+          inline: a user who reads the raw field name and unchecks everything to
+          "enable everything" ends up disabling every tool instead. */}
+      <p className="text-xs text-muted-foreground">
+        勾选 = 允许该 agent 使用；取消勾选 = 禁用（写入 disabled_tools）
+      </p>
       {tools.map((tool) => {
         const checked = !disabled.includes(tool.name)
         return (

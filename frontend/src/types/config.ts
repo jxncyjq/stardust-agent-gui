@@ -74,7 +74,10 @@ export const CONFIG_SECTIONS: SectionSpec[] = [
       { path: 'runtime.demo_response', label: 'demo_response', widget: 'text' },
       { path: 'runtime.max_tool_rounds', label: 'max_tool_rounds', widget: 'number' },
       { path: 'runtime.lazy_tools', label: 'lazy_tools', widget: 'toggle' },
-      { path: 'runtime.disabled_tools', label: 'disabled_tools', widget: 'tool-checklist' },
+      // Labelled by what the checkboxes mean (checked = allowed), not by the
+      // raw deny-list field name: "disabled_tools" reads as "the checked ones
+      // are disabled" and led to every tool being switched off by mistake.
+      { path: 'runtime.disabled_tools', label: '可用工具（勾选=允许使用）', widget: 'tool-checklist' },
     ],
   },
   {
