@@ -199,10 +199,12 @@ export const CONFIG_SECTIONS: SectionSpec[] = [
   {
     key: 'web',
     title: 'Web 工具 (高级)',
-    help: 'fetch_url 工具。默认开启 SSRF 防护，allow_private_hosts 才允许内网 IP。',
+    help: 'fetch_url 抓取 + web_search 搜索。默认开启 SSRF 防护，allow_private_hosts 才允许内网 IP。web_search 需配 searxng_url（SearXNG 实例）才启用；SearXNG 常在内网（如 127.0.0.1），其访问不受 SSRF 防护限制。',
     advanced: true,
     fields: [
       { path: 'web.enabled', label: 'enabled', widget: 'toggle' },
+      { path: 'web.searxng_url', label: 'searxng_url（SearXNG 地址，如 http://127.0.0.1:9888；配了才启用 web_search）', widget: 'text' },
+      { path: 'web.search_engine', label: 'search_engine（baidu / google / bing，留空=实例默认）', widget: 'text' },
       { path: 'web.allow_private_hosts', label: 'allow_private_hosts', widget: 'toggle' },
       { path: 'web.timeout_seconds', label: 'timeout_seconds', widget: 'number' },
       { path: 'web.max_response_kb', label: 'max_response_kb', widget: 'number' },
