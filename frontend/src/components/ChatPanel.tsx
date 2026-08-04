@@ -897,7 +897,7 @@ export function ChatPanel() {
             className={
               sending
                 ? 'interactive flex items-center gap-1.5 px-4 py-2 bg-destructive text-destructive-foreground rounded-md text-sm hover:opacity-90'
-                : 'interactive flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:opacity-90 disabled:opacity-50'
+                : 'interactive flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:opacity-90'
             }
             onClick={sending ? onStop : sendMessage}
             aria-label={sending ? '停止任务' : '发送消息'}
