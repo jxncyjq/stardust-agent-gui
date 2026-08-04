@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -95,4 +96,73 @@ func (a *App) GetAgentConfig(rel string) (AgentConfigResult, error) {
 		return AgentConfigResult{}, fmt.Errorf("read agent config %q: %w", path, err)
 	}
 	return AgentConfigResult{Exists: true, Content: string(data)}, nil
+}
+
+// ModelInfo is the active model an agent uses plus its context window, for the
+// GUI's model badge.
+type ModelInfo struct {
+	Model         string `json:"model"`
+	ContextLength int    `json:"context_length"`
+	Profile       string `json:"profile"`
+}
+
+// mainConfigModelView / agentConfigProfileView are the minimal JSON subsets this
+// binding reads. legionAgentGUI cannot import legionAgent/internal/config, so it
+// parses the raw config JSON directly (same "read the file verbatim" approach as
+// GetConfig).
+type mainConfigModelView struct {
+	Maas struct {
+		DefaultProfile string `json:"default_profile"`
+		Profiles       map[string]struct {
+			Model         string `json:"model"`
+			ContextLength int    `json:"context_length"`
+		} `json:"profiles"`
+	} `json:"maas"`
+	Agents map[string]string `json:"agents"`
+}
+
+type agentConfigProfileView struct {
+	MaasProfile string `json:"maas_profile"`
+}
+
+// GetAgentModelInfo resolves the model + context window agentName actually uses:
+// the agent's maas_profile (empty, or agent not in the agents map → maas.default_profile)
+// → maas.profiles[profile]. Returns an error (fail-loud) when the resolved
+// profile is not in maas.profiles — a misconfiguration the UI must surface.
+// Called by React via the Wails bindings.
+func (a *App) GetAgentModelInfo(agentName string) (ModelInfo, error) {
+	raw, err := a.GetConfig()
+	if err != nil {
+		return ModelInfo{}, err
+	}
+	var main mainConfigModelView
+	if err := json.Unmarshal([]byte(raw), &main); err != nil {
+		return ModelInfo{}, fmt.Errorf("parse main config for model info: %w", err)
+	}
+
+	profile := ""
+	if rel, ok := main.Agents[agentName]; ok && strings.TrimSpace(rel) != "" {
+		ac, err := a.GetAgentConfig(rel)
+		if err != nil {
+			return ModelInfo{}, err
+		}
+		if ac.Exists {
+			var av agentConfigProfileView
+			if err := json.Unmarshal([]byte(ac.Content), &av); err != nil {
+				return ModelInfo{}, fmt.Errorf("parse agent config %q for model info: %w", rel, err)
+			}
+			profile = strings.TrimSpace(av.MaasProfile)
+		}
+	}
+	if profile == "" {
+		profile = strings.TrimSpace(main.Maas.DefaultProfile)
+	}
+	if profile == "" {
+		return ModelInfo{}, fmt.Errorf("agent %q: no maas_profile and no maas.default_profile configured", agentName)
+	}
+	p, ok := main.Maas.Profiles[profile]
+	if !ok {
+		return ModelInfo{}, fmt.Errorf("agent %q resolved profile %q not found in maas.profiles", agentName, profile)
+	}
+	return ModelInfo{Model: p.Model, ContextLength: p.ContextLength, Profile: profile}, nil
 }
