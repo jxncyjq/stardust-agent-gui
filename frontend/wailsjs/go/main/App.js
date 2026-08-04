@@ -22,6 +22,10 @@ export function GetAgentConfig(arg1) {
   return window['go']['main']['App']['GetAgentConfig'](arg1);
 }
 
+export function GetAgentModelInfo(arg1) {
+  return window['go']['main']['App']['GetAgentModelInfo'](arg1);
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }
