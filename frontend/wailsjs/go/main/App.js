@@ -46,6 +46,10 @@ export function HandoffTask(arg1, arg2, arg3) {
   return window['go']['main']['App']['HandoffTask'](arg1, arg2, arg3);
 }
 
+export function InterruptTask(arg1) {
+  return window['go']['main']['App']['InterruptTask'](arg1);
+}
+
 export function ListAgents() {
   return window['go']['main']['App']['ListAgents']();
 }

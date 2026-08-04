@@ -24,6 +24,8 @@ export function GetTaskResult(arg1:string):Promise<Record<string, any>>;
 
 export function HandoffTask(arg1:string,arg2:string,arg3:string):Promise<void>;
 
+export function InterruptTask(arg1:string):Promise<void>;
+
 export function ListAgents():Promise<Array<string>>;
 
 export function ListAuditEvents():Promise<Array<Record<string, any>>>;

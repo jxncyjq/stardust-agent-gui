@@ -319,6 +319,28 @@ func (a *App) SubmitTask(prompt string, sessionID string, images []string, agent
 	return taskID, nil
 }
 
+// InterruptTask cancels a running task on the embedded serve, stopping its
+// tool-loop mid-flight. A non-2xx status (e.g. 404 when the task already
+// finished) is returned as an error rather than silently ignored. Called by
+// React via the Wails bindings.
+func (a *App) InterruptTask(taskID string) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return fmt.Errorf("task id is required")
+	}
+	resp, err := a.client.Post(a.BaseURL()+"/v1/tasks/"+taskID+"/interrupt", "application/json", nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("interrupt task %q failed: status %d: %s", taskID, resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
 // patchSession issues a PATCH /v1/sessions/{id} with the given JSON body fields
 // and discards the response body so the pooled connection is reused. Only the
 // provided fields are changed by the backend; a non-2xx status is reported as a
