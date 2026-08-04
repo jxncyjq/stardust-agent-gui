@@ -24,6 +24,7 @@ import { ContextMenu } from './ContextMenu'
 import { PlusIcon, XIcon, SendIcon, SpinnerIcon, BotIcon, FolderIcon } from './icons'
 import { AgentSelector } from './AgentSelector'
 import { ModeSelector } from './ModeSelector'
+import { ModelBadge } from './ModelBadge'
 import { ApprovalPrompt } from './ApprovalPrompt'
 import { useAgentStore } from '../stores/agentStore'
 
@@ -918,6 +919,7 @@ export function ChatPanel() {
           )}
           <AgentSelector />
           <ModeSelector />
+          <ModelBadge />
         </div>
       </div>
     </div>

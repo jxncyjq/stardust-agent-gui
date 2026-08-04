@@ -5,6 +5,7 @@ interface Profile {
   base_url?: string
   api_key?: string
   prompt_cache?: boolean
+  context_length?: number
 }
 
 // ProfilesEditor edits the maas.profiles map: add/remove named profiles and edit
@@ -54,6 +55,23 @@ export function ProfilesEditor({
               />
             </div>
           ))}
+          <div className="flex items-center gap-2">
+            <label className="text-[10px] uppercase text-muted-foreground w-16 shrink-0">context</label>
+            <input
+              type="number"
+              min={0}
+              className="text-xs px-2 py-1 rounded border border-input bg-background w-full"
+              value={profiles[name]?.context_length ?? ''}
+              placeholder="上下文 token 数，如 128000"
+              onChange={(e) => {
+                const raw = e.target.value
+                onChange({
+                  ...profiles,
+                  [name]: { ...profiles[name], context_length: raw === '' ? undefined : Number(raw) },
+                })
+              }}
+            />
+          </div>
         </div>
       ))}
       <button
