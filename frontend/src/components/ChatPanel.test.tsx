@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   ListAgents: vi.fn(),
   ServeStatus: vi.fn(),
   ListPendingApprovals: vi.fn(),
+  GetAgentModelInfo: vi.fn(),
 }))
 vi.mock('../../wailsjs/go/main/App', () => mocks)
 
@@ -87,6 +88,7 @@ beforeEach(() => {
   mocks.ListAgents.mockResolvedValue([])
   mocks.ServeStatus.mockResolvedValue({ running: true, port: 0 })
   mocks.ListPendingApprovals.mockResolvedValue([])
+  mocks.GetAgentModelInfo.mockResolvedValue({ model: 'test-model', context_length: 128000, profile: 'p' })
   useChatStore.setState({ messages: [] })
   useSessionStore.setState({ currentSessionId: '', sessions: [] })
   useRunStore.setState({ runs: {}, now: Date.now() })
