@@ -10,6 +10,7 @@ import {
   SkillCommand,
   PickDirectory,
   SetSessionWorkingDir,
+  InterruptTask,
 } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { useChatStore } from '../stores/chatStore'
@@ -21,7 +22,7 @@ import { MessageBubble } from './MessageBubble'
 import { ExecutionStatus } from './ExecutionStatus'
 import { SlashCommandMenu } from './SlashCommandMenu'
 import { ContextMenu } from './ContextMenu'
-import { PlusIcon, XIcon, SendIcon, SpinnerIcon, BotIcon, FolderIcon } from './icons'
+import { PlusIcon, XIcon, SendIcon, SpinnerIcon, BotIcon, FolderIcon, StopIcon } from './icons'
 import { AgentSelector } from './AgentSelector'
 import { ModeSelector } from './ModeSelector'
 import { ModelBadge } from './ModelBadge'
@@ -80,10 +81,10 @@ const POLL_INTERVAL_MS = 3000
 // failure mode that unlimited max_tool_rounds made routine. This bound exists
 // only so a wait cannot leak forever, and hitting it reports the truth.
 const TASK_WAIT_TIMEOUT_MS = 30 * 60 * 1000
-const TERMINAL_STATUSES = ['done', 'failed', 'suspended']
+const TERMINAL_STATUSES = ['done', 'failed', 'suspended', 'cancelled']
 // Terminal lifecycle events on the SSE stream (serve emits RuntimeEvent types
 // with underscores; the payload carries task_id).
-const TERMINAL_EVENT_TYPES = ['task_completed', 'task_failed']
+const TERMINAL_EVENT_TYPES = ['task_completed', 'task_failed', 'task_cancelled']
 
 // TaskOutcome is what the UI needs once a submitted task stops running.
 // timedOut is carried explicitly rather than encoded as an empty result: the
@@ -276,6 +277,7 @@ export function ChatPanel() {
   const now = useRunStore((s) => s.now)
   const startRun = useRunStore((s) => s.startRun)
   const updateRun = useRunStore((s) => s.updateRun)
+  const setRunTask = useRunStore((s) => s.setRunTask)
   const finishRun = useRunStore((s) => s.finishRun)
   const tick = useRunStore((s) => s.tick)
 
@@ -674,6 +676,7 @@ export function ChatPanel() {
 
     try {
       const taskID = await SubmitTask(prompt, sessionID, pendingImages, agentID)
+      setRunTask(sessionID, taskID)
 
       const { status, result, totalTokens, promptTokens, completionTokens, cachedTokens, timedOut, streamedId } =
         await waitForTaskOutcome(taskID, sessionID, agentID, (tokens) => updateRun(sessionID, tokens))
@@ -683,10 +686,12 @@ export function ChatPanel() {
 
       const content = timedOut
         ? `任务仍在后端运行（前端已等待 ${Math.round(TASK_WAIT_TIMEOUT_MS / 60000)} 分钟未见结束事件）。可在任务面板查看最终结果。`
-        : result.trim() ||
-          (status === 'failed'
-            ? '任务执行失败，未返回结果。'
-            : `任务状态: ${status}，暂无结果。`)
+        : status === 'cancelled'
+          ? (result.trim() ? `${result.trim()}\n\n（已中断）` : '（已中断）')
+          : result.trim() ||
+            (status === 'failed'
+              ? '任务执行失败，未返回结果。'
+              : `任务状态: ${status}，暂无结果。`)
 
       // Only touch the live view if the target session is still the one on
       // screen; otherwise the answer is already persisted as a turn and will
@@ -710,8 +715,16 @@ export function ChatPanel() {
         if (bubblePresent) {
           // Finalize in place: the streamed text is the reply, so nothing is
           // appended. Attach usage meta only when the task actually completed
-          // (a timeout carries no usage).
-          updateMessage(streamedId!, { streaming: false, agent: agentID, ...(timedOut ? {} : { meta }) })
+          // (a timeout carries no usage). A cancelled task keeps its partial
+          // streamed text — it is stopped, not cleared — with a short marker
+          // appended so it does not read as a normal completion.
+          const priorContent = useChatStore.getState().messages.find((m) => m.id === streamedId)?.content ?? ''
+          updateMessage(streamedId!, {
+            streaming: false,
+            agent: agentID,
+            ...(status === 'cancelled' ? { content: `${priorContent}\n\n（已中断）` } : {}),
+            ...(timedOut ? {} : { meta }),
+          })
           if (timedOut) {
             // The finalized bubble alone cannot convey "still running"; surface
             // the same notice the non-streaming path shows rather than dropping
@@ -742,6 +755,24 @@ export function ChatPanel() {
       }
     } finally {
       finishRun(sessionID)
+    }
+  }
+
+  // onStop interrupts the running task for the current session. It is
+  // fail-loud: an InterruptTask error (task already finished, backend
+  // unreachable, ...) surfaces as a system notice rather than being
+  // swallowed, and a missing taskID (race between startRun and the SubmitTask
+  // response landing) is reported instead of silently doing nothing.
+  async function onStop() {
+    const taskID = currentRun?.taskID
+    if (!taskID) {
+      addSystem('无法中断：未找到运行中的任务 ID')
+      return
+    }
+    try {
+      await InterruptTask(taskID)
+    } catch (err) {
+      addSystem(`中断失败: ${errText(err)}`)
     }
   }
 
@@ -863,13 +894,16 @@ export function ChatPanel() {
             disabled={sending}
           />
           <button
-            className="interactive flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:opacity-90 disabled:opacity-50"
-            onClick={sendMessage}
-            disabled={sending}
-            aria-label={sending ? '发送中' : '发送消息'}
+            className={
+              sending
+                ? 'interactive flex items-center gap-1.5 px-4 py-2 bg-destructive text-destructive-foreground rounded-md text-sm hover:opacity-90'
+                : 'interactive flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:opacity-90 disabled:opacity-50'
+            }
+            onClick={sending ? onStop : sendMessage}
+            aria-label={sending ? '停止任务' : '发送消息'}
           >
-            {sending ? <SpinnerIcon /> : <SendIcon />}
-            <span>{sending ? '发送中' : '发送'}</span>
+            {sending ? <StopIcon /> : <SendIcon />}
+            <span>{sending ? '停止' : '发送'}</span>
           </button>
         </div>
 

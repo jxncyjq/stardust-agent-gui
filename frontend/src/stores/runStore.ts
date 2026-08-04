@@ -8,6 +8,12 @@ export interface SessionRun {
   running: boolean
   startedAt: number
   totalTokens: number
+  // taskID is the backend task id for the in-flight run, set once SubmitTask
+  // resolves. It is what the Stop button passes to InterruptTask, so it must
+  // be readable independently of the SubmitTask call site (the button lives
+  // elsewhere in the tree). Undefined before SubmitTask resolves or once the
+  // run has finished.
+  taskID?: string
 }
 
 interface RunStore {
@@ -18,6 +24,7 @@ interface RunStore {
   now: number
   startRun: (sessionId: string) => void
   updateRun: (sessionId: string, totalTokens: number) => void
+  setRunTask: (sessionId: string, taskID: string) => void
   finishRun: (sessionId: string) => void
   tick: () => void
 }
@@ -34,6 +41,12 @@ export const useRunStore = create<RunStore>((set) => ({
       const run = s.runs[sessionId]
       if (!run) return s
       return { runs: { ...s.runs, [sessionId]: { ...run, totalTokens } } }
+    }),
+  setRunTask: (sessionId, taskID) =>
+    set((s) => {
+      const run = s.runs[sessionId]
+      if (!run) return s
+      return { runs: { ...s.runs, [sessionId]: { ...run, taskID } } }
     }),
   finishRun: (sessionId) =>
     set((s) => {

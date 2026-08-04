@@ -143,6 +143,16 @@ export function SendIcon(props: SVGProps<SVGSVGElement>) {
   )
 }
 
+// StopIcon marks the send button's "停止" state while a task is running (a
+// filled square, matching the universal stop-playback glyph).
+export function StopIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Icon {...props}>
+      <rect width="14" height="14" x="5" y="5" rx="1.5" fill="currentColor" stroke="none" />
+    </Icon>
+  )
+}
+
 // SpinnerIcon is a spinning loader. The `animate-spin` utility is gated by
 // prefers-reduced-motion in style.css, so it holds still for users who opt out.
 export function SpinnerIcon({ className = 'w-4 h-4', ...props }: SVGProps<SVGSVGElement>) {

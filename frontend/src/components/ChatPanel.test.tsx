@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   SkillCommand: vi.fn(),
   PickDirectory: vi.fn(),
   SetSessionWorkingDir: vi.fn(),
+  InterruptTask: vi.fn(),
   SetSessionMode: vi.fn(),
   ListAgents: vi.fn(),
   ServeStatus: vi.fn(),
@@ -89,6 +90,7 @@ beforeEach(() => {
   mocks.ServeStatus.mockResolvedValue({ running: true, port: 0 })
   mocks.ListPendingApprovals.mockResolvedValue([])
   mocks.GetAgentModelInfo.mockResolvedValue({ model: 'test-model', context_length: 128000, profile: 'p' })
+  mocks.InterruptTask.mockResolvedValue(undefined)
   useChatStore.setState({ messages: [] })
   useSessionStore.setState({ currentSessionId: '', sessions: [] })
   useRunStore.setState({ runs: {}, now: Date.now() })
@@ -562,5 +564,81 @@ describe('ChatPanel task-outcome wait', () => {
     expect(lastAssistantContent()).toBe('完成')
     expect((runtimeMocks.listeners['agent:event'] ?? []).length).toBe(baseline)
     expect(runtimeMocks.EventsOff).not.toHaveBeenCalledWith('agent:event')
+  })
+
+  it('shows a Stop button while sending and calls InterruptTask with the running task id when clicked', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-stop')
+    // Left pending deliberately: the task must still be "sending" when the
+    // button is clicked, so GetTaskResult never resolves in this test.
+    mocks.GetTaskResult.mockReturnValue(new Promise(() => {}))
+    render(<ChatPanel />)
+
+    // Before sending, the button reads 发送 and there is no Stop control.
+    expect(screen.queryByRole('button', { name: '停止任务' })).toBeNull()
+
+    submit()
+    await flush()
+
+    const stopButton = screen.getByRole('button', { name: '停止任务' })
+    expect(screen.queryByRole('button', { name: '发送消息' })).toBeNull()
+
+    fireEvent.click(stopButton)
+    await flush()
+
+    expect(mocks.InterruptTask).toHaveBeenCalledWith('task-stop')
+  })
+
+  it('reports a system notice when InterruptTask rejects instead of failing silently', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-stop-err')
+    mocks.GetTaskResult.mockReturnValue(new Promise(() => {}))
+    mocks.InterruptTask.mockRejectedValue(new Error('task already finished'))
+    render(<ChatPanel />)
+
+    submit()
+    await flush()
+
+    const stopButton = screen.getByRole('button', { name: '停止任务' })
+    fireEvent.click(stopButton)
+    await flush()
+
+    const notice = useChatStore.getState().messages.some(
+      (m) => m.role === 'system' && m.content.includes('中断失败') && m.content.includes('task already finished')
+    )
+    expect(notice).toBe(true)
+  })
+
+  it('a task_cancelled SSE event finalizes the streamed bubble, keeps the partial text, and does not read as a failure', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-cancel')
+    mocks.GetTaskResult.mockResolvedValue({ status: 'cancelled', result: '部分输出' })
+    render(<ChatPanel />)
+
+    submit()
+    await flush()
+
+    await act(async () => {
+      emitAgentToken({ task_id: 'task-cancel', message: '已经写了一半' })
+    })
+    await flush()
+
+    let assistants = assistantMessages()
+    expect(assistants.length).toBe(1)
+    expect(assistants[0].streaming).toBe(true)
+
+    await act(async () => {
+      emitAgentEvent({ type: 'task_cancelled', data: JSON.stringify({ task_id: 'task-cancel' }) })
+    })
+    await flush()
+
+    assistants = assistantMessages()
+    expect(assistants.length).toBe(1)
+    expect(assistants[0].streaming).toBe(false)
+    // The partial streamed text survives — it is not cleared — and is marked
+    // as interrupted rather than reading like a normal completion.
+    expect(assistants[0].content).toContain('已经写了一半')
+    expect(assistants[0].content).toContain('已中断')
+    expect(assistants[0].content).not.toContain('任务执行失败')
   })
 })
