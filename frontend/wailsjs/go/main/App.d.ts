@@ -14,6 +14,8 @@ export function GetAgentConfig(arg1:string):Promise<main.AgentConfigResult>;
 
 export function GetAgentModelInfo(arg1:string):Promise<main.ModelInfo>;
 
+export function GetBrowserEndpoint():Promise<{baseURL: string; token: string}>;
+
 export function GetConfig():Promise<string>;
 
 export function GetConfigPath():Promise<string>;

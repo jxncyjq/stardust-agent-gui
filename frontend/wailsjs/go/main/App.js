@@ -26,6 +26,10 @@ export function GetAgentModelInfo(arg1) {
   return window['go']['main']['App']['GetAgentModelInfo'](arg1);
 }
 
+export function GetBrowserEndpoint() {
+  return window['go']['main']['App']['GetBrowserEndpoint']();
+}
+
 export function GetConfig() {
   return window['go']['main']['App']['GetConfig']();
 }

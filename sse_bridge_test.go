@@ -212,3 +212,35 @@ func TestConsumeSSERejectsNonOKStatus(t *testing.T) {
 		t.Fatal("expected an error for a non-200 status")
 	}
 }
+
+// TestConsumeSSEForwardsBrowserSession verifies that browser session lifecycle
+// SSE frames (browser:session_opened/closed) are forwarded on the dedicated
+// "browser:session" channel the GUI browser view listens on, carrying the raw
+// SSE data string for the React side to parse.
+func TestConsumeSSEForwardsBrowserSession(t *testing.T) {
+	frame := "event: browser:session_opened\ndata: {\"session_id\":\"sess-1\",\"url\":\"https://x\"}\n\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte(frame))
+	}))
+	defer srv.Close()
+
+	var got []emittedEvent
+	emit := func(event string, data any) { got = append(got, emittedEvent{event: event, data: data}) }
+	_ = consumeSSEWithToken(context.Background(), srv.URL, "", emit)
+
+	var found bool
+	for _, e := range got {
+		if e.event == "browser:session" {
+			found = true
+			m := e.data.(map[string]any)
+			if m["type"] != "browser:session_opened" {
+				t.Fatalf("forwarded type wrong: %v", m["type"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("browser:session not forwarded; got %+v", got)
+	}
+}
