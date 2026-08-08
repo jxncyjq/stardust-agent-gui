@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -221,5 +222,30 @@ func TestNewSessionDoesNotClaimAnAgent(t *testing.T) {
 	}
 	if gotBody["company_id"] != "default-company" {
 		t.Errorf("body[company_id] = %v, want %q", gotBody["company_id"], "default-company")
+	}
+}
+
+// TestGetBrowserEndpointReturnsBaseURLAndToken checks the Wails binding that
+// hands the frontend the handshake it needs to self-connect the built-in
+// browser stream: the loopback base URL plus the bearer token. A fresh App has
+// not started serve, so port is 0 and token is "" — the assembly logic still
+// has to report the base URL shape and expose the (possibly empty) token field.
+func TestGetBrowserEndpointReturnsBaseURLAndToken(t *testing.T) {
+	a := NewApp("")
+
+	ep := a.GetBrowserEndpoint()
+	if ep.BaseURL == "" {
+		t.Fatal("BaseURL empty")
+	}
+	// token may be empty (hardening off) — only assert the field is wired to
+	// a.serve.Token() and that BaseURL has the loopback shape.
+	if !strings.HasPrefix(ep.BaseURL, "http://127.0.0.1:") {
+		t.Fatalf("BaseURL = %q", ep.BaseURL)
+	}
+	if ep.BaseURL != a.BaseURL() {
+		t.Fatalf("BaseURL = %q, want %q", ep.BaseURL, a.BaseURL())
+	}
+	if ep.Token != a.serve.Token() {
+		t.Fatalf("Token = %q, want %q", ep.Token, a.serve.Token())
 	}
 }

@@ -29,8 +29,15 @@ const sseRetryDelay = 2 * time.Second
 // different port. Caching the base URL at startup would leave the bridge
 // silently dialing a dead port after a restart, so the caller must pass a
 // closure (typically a.BaseURL) that always reads the current port.
-func StartSSEBridge(ctx context.Context, appCtx context.Context, baseURLFn func() string) {
-	startSSEBridge(ctx, baseURLFn, func(event string, data any) {
+//
+// tokenFn is likewise read before every (re)connection rather than captured
+// once: when the loopback serve is hardened it mints a one-time bearer token
+// (see ServeManager.Token), and ServeManager.Restart rebinds on a new port
+// *and* mints a new token, so a token captured at startup would be rejected
+// with 403 after a restart. tokenFn returning "" (non-hardened serve) means no
+// Authorization header is sent.
+func StartSSEBridge(ctx context.Context, appCtx context.Context, baseURLFn func() string, tokenFn func() string) {
+	startSSEBridge(ctx, baseURLFn, tokenFn, func(event string, data any) {
 		runtime.EventsEmit(appCtx, event, data)
 	})
 }
@@ -39,14 +46,17 @@ func StartSSEBridge(ctx context.Context, appCtx context.Context, baseURLFn func(
 // (rather than calling runtime.EventsEmit directly) because the Wails runtime
 // requires a live app context that tests cannot construct; production code
 // goes through StartSSEBridge, which binds emit to runtime.EventsEmit.
-func startSSEBridge(ctx context.Context, baseURLFn func() string, emit func(event string, data any)) {
+func startSSEBridge(ctx context.Context, baseURLFn func() string, tokenFn func() string, emit func(event string, data any)) {
 	go func() {
 		for {
 			if err := ctx.Err(); err != nil {
 				return
 			}
 			url := baseURLFn() + "/v1/events"
-			err := consumeSSE(ctx, url, emit)
+			// Read the token on every reconnect (not captured once): a Restart
+			// rebinds on a new port and mints a fresh token, so a stale token
+			// would be rejected 403 by the hardened serve.
+			err := consumeSSEWithToken(ctx, url, tokenFn(), emit)
 			if ctx.Err() != nil {
 				return
 			}
@@ -67,18 +77,31 @@ func startSSEBridge(ctx context.Context, baseURLFn func() string, emit func(even
 	}()
 }
 
-// consumeSSE performs a single SSE connection attempt against url, emitting
-// each received event, and blocks until the stream ends or ctx is cancelled.
-// It always returns a non-nil error describing why the attempt ended
-// (including ctx cancellation) so the caller can log/retry uniformly; the
-// caller is responsible for checking ctx.Err() to distinguish a shutdown from
-// a real failure.
+// consumeSSE performs a single SSE connection attempt against url without a
+// bearer token. It is a thin back-compat wrapper over consumeSSEWithToken for
+// callers (and tests) that target a non-hardened serve.
 func consumeSSE(ctx context.Context, url string, emit func(event string, data any)) error {
+	return consumeSSEWithToken(ctx, url, "", emit)
+}
+
+// consumeSSEWithToken performs a single SSE connection attempt against url,
+// emitting each received event, and blocks until the stream ends or ctx is
+// cancelled. When token is non-empty it attaches an Authorization: Bearer
+// header so the request is accepted by the loopback-hardened serve (which 403s
+// unauthenticated requests); an empty token sends no Authorization header
+// (non-hardened serve). It always returns a non-nil error describing why the
+// attempt ended (including ctx cancellation) so the caller can log/retry
+// uniformly; the caller is responsible for checking ctx.Err() to distinguish a
+// shutdown from a real failure.
+func consumeSSEWithToken(ctx context.Context, url, token string, emit func(event string, data any)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("build SSE request for %s: %w", url, err)
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("connect to %s: %w", url, err)

@@ -154,6 +154,46 @@ func TestConsumeSSESkipsNonJSONTokenPayload(t *testing.T) {
 	}
 }
 
+// TestConsumeSSESendsBearerToken verifies consumeSSEWithToken attaches an
+// Authorization: Bearer header when a non-empty token is supplied, so the
+// bridge can reach the loopback-hardened serve (which 403s unauthenticated
+// requests). The server closes the stream immediately, so the returned error is
+// expected and ignored; only the header the server observed is asserted.
+func TestConsumeSSESendsBearerToken(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: ping\ndata: {}\n\n"))
+	}))
+	defer srv.Close()
+
+	_ = consumeSSEWithToken(context.Background(), srv.URL, "tok-123", func(string, any) {})
+	if gotAuth != "Bearer tok-123" {
+		t.Fatalf("Authorization = %q, want Bearer tok-123", gotAuth)
+	}
+}
+
+// TestConsumeSSEOmitsAuthWhenTokenEmpty verifies that an empty token results in
+// no Authorization header at all (rather than a bare "Bearer "), matching the
+// non-hardened serve where no token is required.
+func TestConsumeSSEOmitsAuthWhenTokenEmpty(t *testing.T) {
+	var authPresent bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, authPresent = r.Header["Authorization"]
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: ping\ndata: {}\n\n"))
+	}))
+	defer srv.Close()
+
+	_ = consumeSSEWithToken(context.Background(), srv.URL, "", func(string, any) {})
+	if authPresent {
+		t.Fatal("Authorization header present, want absent when token is empty")
+	}
+}
+
 // TestConsumeSSERejectsNonOKStatus verifies a non-200 response (e.g. the
 // embedded service returning 404/502 mid-restart) is surfaced as an error
 // rather than silently scanning an error-page body as if it were an event

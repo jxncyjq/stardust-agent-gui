@@ -66,7 +66,7 @@ func (a *App) startup(ctx context.Context) {
 		// on every reconnect: SaveAll can restart the embedded service on a new
 		// random port (see ServeManager.Restart), and a cached URL would leave
 		// the bridge dialing the old, now-dead port forever.
-		StartSSEBridge(ctx, ctx, a.BaseURL)
+		StartSSEBridge(ctx, ctx, a.BaseURL, a.serve.Token)
 	}
 	a.writeStartupLog(err)
 }
@@ -103,6 +103,22 @@ func (a *App) BaseURL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d", a.serve.Port())
 }
 
+// BrowserEndpoint is the handshake the frontend needs to connect itself to the
+// built-in browser stream (spec §3.4): the loopback base URL plus the bearer
+// token minted by the hardened serve.
+type BrowserEndpoint struct {
+	BaseURL string `json:"baseURL"`
+	Token   string `json:"token"`
+}
+
+// GetBrowserEndpoint is a Wails binding exposed to the frontend: the React side
+// uses it to open a fetch/EventSource directly against
+// /v1/browser/sessions/{id}/stream (with Authorization: Bearer <token>) to watch
+// the agent's browsing. Token is "" when loopback hardening is off.
+func (a *App) GetBrowserEndpoint() BrowserEndpoint {
+	return BrowserEndpoint{BaseURL: a.BaseURL(), Token: a.serve.Token()}
+}
+
 // ServeStatus returns the current embedded service status. The frontend calls
 // this on mount to avoid missing the one-shot serve:status event emitted during
 // startup (Wails events are not buffered).
@@ -117,7 +133,17 @@ func (a *App) ServeStatus() map[string]any {
 // shared pooled client and fully drains the body so the connection is returned
 // to the idle pool for reuse.
 func (a *App) apiGet(path string) ([]byte, error) {
-	resp, err := a.client.Get(a.BaseURL() + path)
+	req, err := http.NewRequest(http.MethodGet, a.BaseURL()+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Read the token per call (not captured): a Restart mints a fresh one, so a
+	// cached token would be rejected 403 by the hardened serve. An empty token
+	// (non-hardened serve) means no Authorization header is sent.
+	if tok := a.serve.Token(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := a.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
