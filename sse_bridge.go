@@ -155,6 +155,15 @@ func consumeSSEWithToken(ctx context.Context, url, token string, emit func(event
 						"type": eventType,
 						"data": data,
 					})
+				case "browser:session_opened", "browser:session_closed":
+					// Browser session lifecycle events get a dedicated channel so
+					// the browser view can discover active sessions without filtering
+					// the generic firehose. The raw SSE data string is forwarded
+					// verbatim; the React side parses it.
+					emit("browser:session", map[string]any{
+						"type": eventType,
+						"data": data,
+					})
 				}
 			}
 			eventType = ""
