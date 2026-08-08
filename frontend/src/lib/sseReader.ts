@@ -37,6 +37,12 @@ export async function readSSE(
       if (ev) onEvent(ev)
     }
   }
+  // 流关闭后 flush 多字节残余，再解析最后一条无尾随空行的帧，避免丢弃。
+  buf += decoder.decode()
+  if (buf.trim() !== '') {
+    const ev = parseFrame(buf)
+    if (ev) onEvent(ev)
+  }
 }
 
 function parseFrame(raw: string): SSEEvent | null {

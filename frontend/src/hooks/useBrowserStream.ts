@@ -20,7 +20,10 @@ export function useBrowserStream(sessionId: string | null) {
           const url = `${ep.baseURL}/v1/browser/sessions/${sessionId}/stream`
           store.getState().setConnected(true)
           await readSSE(url, ep.token, store.getState().lastEventId, (e) => {
-            if (e.id) store.getState().setLastEventId(Number(e.id))
+            if (e.id) {
+              const n = Number(e.id)
+              if (Number.isFinite(n)) store.getState().setLastEventId(n)
+            }
             let payload: unknown
             try { payload = JSON.parse(e.data) } catch (err) { console.error('browser stream data not JSON:', e, err); return }
             if (e.event === 'frame') {
@@ -32,6 +35,8 @@ export function useBrowserStream(sessionId: string | null) {
               store.getState().onProgress(payload as { action: string; status: string; ref?: string })
             }
           }, ac.signal)
+          // 正常返回（服务端 EOF 关闭流）也要退避再重连，否则零延迟狂刷端点。
+          if (!stopped) await new Promise((r) => setTimeout(r, 2000))
         } catch (err) {
           if (stopped) break
           console.error('browser stream disconnected, retrying:', err)

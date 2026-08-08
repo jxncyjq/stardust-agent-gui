@@ -19,14 +19,17 @@ export function BrowserView() {
     const canvas = canvasRef.current
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    let cancelled = false
     const img = new Image()
     img.onload = () => {
+      if (cancelled) return
       canvas.width = img.width
       canvas.height = img.height
       ctx.drawImage(img, 0, 0)
     }
     img.onerror = () => console.warn('browser view: frame decode failed')
     img.src = frameDataUri
+    return () => { cancelled = true }
   }, [frameDataUri])
 
   if (!sessionId) {
