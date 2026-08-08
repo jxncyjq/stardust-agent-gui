@@ -66,7 +66,7 @@ func (a *App) startup(ctx context.Context) {
 		// on every reconnect: SaveAll can restart the embedded service on a new
 		// random port (see ServeManager.Restart), and a cached URL would leave
 		// the bridge dialing the old, now-dead port forever.
-		StartSSEBridge(ctx, ctx, a.BaseURL)
+		StartSSEBridge(ctx, ctx, a.BaseURL, a.serve.Token)
 	}
 	a.writeStartupLog(err)
 }
@@ -117,7 +117,17 @@ func (a *App) ServeStatus() map[string]any {
 // shared pooled client and fully drains the body so the connection is returned
 // to the idle pool for reuse.
 func (a *App) apiGet(path string) ([]byte, error) {
-	resp, err := a.client.Get(a.BaseURL() + path)
+	req, err := http.NewRequest(http.MethodGet, a.BaseURL()+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	// Read the token per call (not captured): a Restart mints a fresh one, so a
+	// cached token would be rejected 403 by the hardened serve. An empty token
+	// (non-hardened serve) means no Authorization header is sent.
+	if tok := a.serve.Token(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := a.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
