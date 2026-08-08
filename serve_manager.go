@@ -13,8 +13,12 @@ import (
 )
 
 type ServeManager struct {
-	cancel  context.CancelFunc
-	port    int
+	cancel context.CancelFunc
+	port   int
+	// token is the one-time bearer token minted by the embedded loopback serve
+	// in hardening mode (empty when hardening is off). Captured in Start so the
+	// GUI's SSE bridge and HTTP calls can attach Authorization: Bearer.
+	token   string
 	running atomic.Bool
 	// done is closed when the running service goroutine exits (after its final
 	// serve:status emit), so Restart can wait for a full teardown before
@@ -46,6 +50,7 @@ func (m *ServeManager) Start(appCtx context.Context, configPath string) error {
 	}
 
 	m.port = listenerPort(result.Listener)
+	m.token = result.Token // Phase 4C: one-time bearer token minted in loopback-hardening mode
 	done := make(chan struct{})
 	m.done = done
 	m.running.Store(true)
@@ -84,6 +89,13 @@ func (m *ServeManager) Stop() {
 
 func (m *ServeManager) Port() int {
 	return m.port
+}
+
+// Token returns the one-time bearer token minted by the embedded loopback serve
+// in hardening mode, or "" when hardening is off. Restart refreshes it because
+// it delegates to Start, which re-captures result.Token each launch.
+func (m *ServeManager) Token() string {
+	return m.token
 }
 
 // Restart stops the running embedded service, waits for it to fully stop
