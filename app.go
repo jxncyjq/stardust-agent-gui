@@ -103,6 +103,22 @@ func (a *App) BaseURL() string {
 	return fmt.Sprintf("http://127.0.0.1:%d", a.serve.Port())
 }
 
+// BrowserEndpoint is the handshake the frontend needs to connect itself to the
+// built-in browser stream (spec §3.4): the loopback base URL plus the bearer
+// token minted by the hardened serve.
+type BrowserEndpoint struct {
+	BaseURL string `json:"baseURL"`
+	Token   string `json:"token"`
+}
+
+// GetBrowserEndpoint is a Wails binding exposed to the frontend: the React side
+// uses it to open a fetch/EventSource directly against
+// /v1/browser/sessions/{id}/stream (with Authorization: Bearer <token>) to watch
+// the agent's browsing. Token is "" when loopback hardening is off.
+func (a *App) GetBrowserEndpoint() BrowserEndpoint {
+	return BrowserEndpoint{BaseURL: a.BaseURL(), Token: a.serve.Token()}
+}
+
 // ServeStatus returns the current embedded service status. The frontend calls
 // this on mount to avoid missing the one-shot serve:status event emitted during
 // startup (Wails events are not buffered).
