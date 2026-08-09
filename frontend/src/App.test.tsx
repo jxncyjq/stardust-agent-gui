@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, fireEvent } from '@testing-library/react'
 
 // App pulls in many bound methods/hooks; stub the wails layer wholesale.
 vi.mock('../wailsjs/go/main/App', () => ({
@@ -9,6 +9,11 @@ vi.mock('../wailsjs/go/main/App', () => ({
   ListAgents: vi.fn().mockResolvedValue([]),
   ListPendingApprovals: vi.fn().mockResolvedValue([]),
   GetAgentModelInfo: vi.fn().mockResolvedValue({}),
+  ListWorkspaceDir: vi.fn().mockResolvedValue([]),
+  ReadWorkspaceFile: vi.fn().mockResolvedValue({}),
+  SearchWorkspaceContent: vi.fn().mockResolvedValue([]),
+  OpenInEditor: vi.fn().mockResolvedValue(undefined),
+  RevealInExplorer: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('../wailsjs/runtime/runtime', () => ({
   EventsOn: vi.fn(() => () => {}),
@@ -33,5 +38,11 @@ describe('App right column preview integration', () => {
     })
     expect(useUIStore.getState().rightView).toBe('preview')
     expect(screen.getByTitle('HTML 预览内容')).toBeInTheDocument()
+  })
+
+  it('switches to files tab', () => {
+    render(<App />)
+    fireEvent.click(screen.getByRole('tab', { name: '文件' }))
+    expect(useUIStore.getState().rightView).toBe('files')
   })
 })
