@@ -1,10 +1,12 @@
-import { memo, useState } from 'react'
+import { memo, useState, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '../lib/utils'
 import { rehypeShikiPlugin } from '../lib/highlighter'
 import type { Message } from '../stores/chatStore'
 import { TerminalIcon, CopyIcon, DownloadIcon } from './icons'
+import { openLink } from '../lib/openLink'
+import { usePreviewStore } from '../stores/previewStore'
 
 interface Props {
   message: Message
@@ -31,6 +33,35 @@ function formatK(n: number): string {
   const k = n / 1000
   const s = k.toFixed(1).replace(/\.0$/, '')
   return `${s}k`
+}
+
+// extractHtmlBlocks pulls the body of every ```html fenced block out of raw
+// markdown. Runs on message.content (not the rendered/highlighted output) so it
+// stays independent of Shiki. Returns [] when there are none.
+function extractHtmlBlocks(content: string): string[] {
+  const re = /```html\r?\n([\s\S]*?)```/g
+  const out: string[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(content)) !== null) out.push(m[1].replace(/\r?\n$/, ''))
+  return out
+}
+
+// LinkRenderer routes anchor clicks through openLink: in a Wails webview a bare
+// <a href> would navigate the whole single-page app away. http(s) opens in the
+// system browser; other schemes are ignored (see openLink).
+function LinkRenderer({ href, children }: { href?: string; children?: ReactNode }) {
+  return (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault()
+        if (href) openLink(href)
+      }}
+      className="cursor-pointer underline"
+    >
+      {children}
+    </a>
+  )
 }
 
 // MessageBubble is memoized: while any session is running, ChatPanel re-renders
@@ -81,7 +112,11 @@ export const MessageBubble = memo(function MessageBubble({ message }: Props) {
       {isAssistant ? (
         // react-markdown v10 dropped the `className` prop; wrap instead.
         <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:bg-background prose-pre:text-foreground prose-table:my-2 prose-headings:mt-3 prose-headings:mb-1">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeShikiPlugin]}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeShikiPlugin]}
+            components={{ a: LinkRenderer }}
+          >
             {message.content || (message.streaming ? '▋' : '')}
           </ReactMarkdown>
         </div>
@@ -102,6 +137,25 @@ export const MessageBubble = memo(function MessageBubble({ message }: Props) {
           )}
         </>
       )}
+
+      {isAssistant && (() => {
+        const htmlBlocks = extractHtmlBlocks(message.content)
+        if (htmlBlocks.length === 0) return null
+        return (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {htmlBlocks.map((html, i) => (
+              <button
+                key={i}
+                type="button"
+                className="interactive rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-background hover:text-foreground"
+                onClick={() => usePreviewStore.getState().open({ kind: 'html', html, title: 'HTML 预览' })}
+              >
+                预览 HTML{htmlBlocks.length > 1 ? ` ${i + 1}` : ''}
+              </button>
+            ))}
+          </div>
+        )
+      })()}
 
       {/* A prompt is as worth copying as a reply — re-sending a tweaked version
           is routine. Only copy applies here: saving a prompt as Markdown has no

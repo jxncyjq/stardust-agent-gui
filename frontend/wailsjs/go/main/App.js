@@ -98,6 +98,10 @@ export function Port() {
   return window['go']['main']['App']['Port']();
 }
 
+export function ReadHTMLFile(arg1) {
+  return window['go']['main']['App']['ReadHTMLFile'](arg1);
+}
+
 export function RenameProject(arg1, arg2) {
   return window['go']['main']['App']['RenameProject'](arg1, arg2);
 }
