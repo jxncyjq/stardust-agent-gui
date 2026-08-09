@@ -109,3 +109,33 @@ func TestSearchWorkspaceContentBadRoot(t *testing.T) {
 		t.Fatal("expected error for non-existent root")
 	}
 }
+
+func TestBuildEditorArgv(t *testing.T) {
+	argv, err := buildEditorArgv(`code "{path}"`, `C:\a b\x.ts`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(argv) != 2 || argv[0] != "code" || argv[1] != `C:\a b\x.ts` {
+		t.Fatalf("got %#v", argv)
+	}
+}
+
+func TestBuildEditorArgvAppendsWhenNoPlaceholder(t *testing.T) {
+	argv, _ := buildEditorArgv("notepad", `x.txt`)
+	if len(argv) != 2 || argv[0] != "notepad" || argv[1] != "x.txt" {
+		t.Fatalf("got %#v", argv)
+	}
+}
+
+func TestBuildEditorArgvNoShellInjection(t *testing.T) {
+	argv, _ := buildEditorArgv("code {path}", `x.txt; rm -rf /`)
+	if len(argv) != 2 || argv[1] != `x.txt; rm -rf /` {
+		t.Fatalf("injection not contained: %#v", argv)
+	}
+}
+
+func TestBuildEditorArgvEmptyTemplate(t *testing.T) {
+	if _, err := buildEditorArgv("   ", "x.txt"); err == nil {
+		t.Fatal("expected error for empty template")
+	}
+}

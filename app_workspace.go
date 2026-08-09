@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
@@ -210,4 +211,88 @@ func (a *App) SearchWorkspaceContent(root, query string) ([]SearchHit, error) {
 		return nil, err
 	}
 	return hits, nil
+}
+
+// buildEditorArgv turns a user editor template into an argv slice. It splits on
+// whitespace with double-quote awareness, then replaces the `{path}` token with
+// the file path as a SINGLE argv element (never shell-interpolated). A template
+// without `{path}` gets the path appended. Empty template → error. The result is
+// run via exec.Command WITHOUT a shell, so path metacharacters cannot inject.
+func buildEditorArgv(template, path string) ([]string, error) {
+	if strings.TrimSpace(template) == "" {
+		return nil, fmt.Errorf("editor template is empty")
+	}
+	tokens := splitArgs(template)
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("editor template has no command")
+	}
+	argv := make([]string, 0, len(tokens)+1)
+	replaced := false
+	for _, tok := range tokens {
+		if strings.Contains(tok, "{path}") {
+			argv = append(argv, strings.ReplaceAll(tok, "{path}", path))
+			replaced = true
+		} else {
+			argv = append(argv, tok)
+		}
+	}
+	if !replaced {
+		argv = append(argv, path)
+	}
+	return argv, nil
+}
+
+// splitArgs splits a command line on whitespace, honoring double quotes so a
+// quoted segment (e.g. "{path}") stays one token. Quotes are stripped.
+func splitArgs(s string) []string {
+	var out []string
+	var cur strings.Builder
+	inQuote := false
+	flush := func() {
+		if cur.Len() > 0 {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	for _, r := range s {
+		switch {
+		case r == '"':
+			inQuote = !inQuote
+		case (r == ' ' || r == '\t') && !inQuote:
+			flush()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	flush()
+	return out
+}
+
+// OpenInEditor launches the user-configured editor on path (no shell). Fail-loud:
+// a bad template or a launch failure returns a wrapped error.
+func (a *App) OpenInEditor(template, path string) error {
+	argv, err := buildEditorArgv(template, path)
+	if err != nil {
+		return fmt.Errorf("open in editor: %w", err)
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("launch editor %q: %w", argv[0], err)
+	}
+	return nil
+}
+
+// RevealInExplorer opens the OS file manager with path selected (Windows
+// explorer /select). Fail-loud on launch error.
+func (a *App) RevealInExplorer(path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("reveal %q: %w", path, err)
+	}
+	cmd := exec.Command("explorer", "/select,"+abs)
+	// explorer returns exit code 1 even on success; Start (not Run) avoids that.
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("launch explorer for %q: %w", abs, err)
+	}
+	return nil
 }

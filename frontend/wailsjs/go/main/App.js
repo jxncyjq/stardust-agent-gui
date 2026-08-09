@@ -86,8 +86,16 @@ export function ListTasks() {
   return window['go']['main']['App']['ListTasks']();
 }
 
+export function ListWorkspaceDir(arg1, arg2) {
+  return window['go']['main']['App']['ListWorkspaceDir'](arg1, arg2);
+}
+
 export function NewSession(arg1, arg2) {
   return window['go']['main']['App']['NewSession'](arg1, arg2);
+}
+
+export function OpenInEditor(arg1, arg2) {
+  return window['go']['main']['App']['OpenInEditor'](arg1, arg2);
 }
 
 export function PickDirectory() {
@@ -102,6 +110,10 @@ export function ReadHTMLFile(arg1) {
   return window['go']['main']['App']['ReadHTMLFile'](arg1);
 }
 
+export function ReadWorkspaceFile(arg1, arg2) {
+  return window['go']['main']['App']['ReadWorkspaceFile'](arg1, arg2);
+}
+
 export function RenameProject(arg1, arg2) {
   return window['go']['main']['App']['RenameProject'](arg1, arg2);
 }
@@ -110,8 +122,16 @@ export function RenameSession(arg1, arg2) {
   return window['go']['main']['App']['RenameSession'](arg1, arg2);
 }
 
+export function RevealInExplorer(arg1) {
+  return window['go']['main']['App']['RevealInExplorer'](arg1);
+}
+
 export function SaveAll(arg1, arg2) {
   return window['go']['main']['App']['SaveAll'](arg1, arg2);
+}
+
+export function SearchWorkspaceContent(arg1, arg2) {
+  return window['go']['main']['App']['SearchWorkspaceContent'](arg1, arg2);
 }
 
 export function SendAgentMessage(arg1, arg2) {
