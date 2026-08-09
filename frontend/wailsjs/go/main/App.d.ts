@@ -14,7 +14,7 @@ export function GetAgentConfig(arg1:string):Promise<main.AgentConfigResult>;
 
 export function GetAgentModelInfo(arg1:string):Promise<main.ModelInfo>;
 
-export function GetBrowserEndpoint():Promise<{baseURL: string; token: string}>;
+export function GetBrowserEndpoint():Promise<main.BrowserEndpoint>;
 
 export function GetConfig():Promise<string>;
 
@@ -49,6 +49,8 @@ export function NewSession(arg1:string,arg2:string):Promise<Record<string, any>>
 export function PickDirectory():Promise<string>;
 
 export function Port():Promise<number>;
+
+export function ReadHTMLFile(arg1:string):Promise<string>;
 
 export function RenameProject(arg1:string,arg2:string):Promise<void>;
 
