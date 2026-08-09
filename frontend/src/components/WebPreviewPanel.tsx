@@ -17,7 +17,7 @@ interface Props {
 // Remote URLs never reach this iframe; they open in the system browser instead
 // (see the toolbar action), sidestepping X-Frame-Options entirely.
 export const WebPreviewPanel = memo(function WebPreviewPanel({ source, onClose }: Props) {
-  if (!source) {
+  if (!source || source.kind !== 'html') {
     return (
       <div className="flex h-full items-center justify-center p-4 text-xs text-muted-foreground">
         暂无预览内容
