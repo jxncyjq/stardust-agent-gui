@@ -3,14 +3,12 @@ import { create } from 'zustand'
 // PreviewSource is the fully-resolved payload the panel renders: always an HTML
 // string fed to <iframe srcdoc>. A local file is resolved to this shape by the
 // backend before it reaches the store — the store never holds a bare path.
-export interface PreviewSource {
-  kind: 'html'
-  html: string
-  title?: string
-  // sourceUrl, when present, is the origin URL for the "open in system browser"
-  // toolbar action. Absent for agent-generated or fenced-block HTML.
-  sourceUrl?: string
-}
+export type PreviewSource =
+  | { kind: 'html';     html: string;    title?: string; sourceUrl?: string }
+  | { kind: 'code';     text: string;    lang: string;   title?: string; path?: string }
+  | { kind: 'markdown'; text: string;    title?: string; path?: string }
+  | { kind: 'image';    dataUri: string; title?: string; path?: string }
+  | { kind: 'binary';   title?: string;  path?: string }
 
 interface PreviewState {
   source: PreviewSource | null
