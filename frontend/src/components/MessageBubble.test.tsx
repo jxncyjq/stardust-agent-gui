@@ -1,7 +1,11 @@
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MessageBubble } from './MessageBubble'
+import { usePreviewStore } from '../stores/previewStore'
+
+const runtimeMocks = vi.hoisted(() => ({ BrowserOpenURL: vi.fn() }))
+vi.mock('../../wailsjs/runtime/runtime', () => runtimeMocks)
 
 describe('MessageBubble agent label', () => {
   // The answering agent is chosen per submission, so it is labelled on the
@@ -91,5 +95,32 @@ describe('MessageBubble image attachments', () => {
   it('still shows the text content alongside images', () => {
     render(<MessageBubble message={{ id: 'u3', role: 'user', content: '看这个', images: ['data:image/png;base64,AAA'] }} />)
     expect(screen.getByText('看这个')).toBeInTheDocument()
+  })
+})
+
+describe('MessageBubble link routing', () => {
+  it('routes http links to the system browser instead of navigating', () => {
+    runtimeMocks.BrowserOpenURL.mockClear()
+    render(<MessageBubble message={{ id: 'a1', role: 'assistant', content: '看 [这里](https://example.com)' }} />)
+    fireEvent.click(screen.getByText('这里'))
+    expect(runtimeMocks.BrowserOpenURL).toHaveBeenCalledWith('https://example.com')
+  })
+})
+
+describe('MessageBubble html preview button', () => {
+  beforeEach(() => usePreviewStore.getState().close())
+
+  it('offers a preview button for a fenced html block and opens it', () => {
+    const md = '前言\n```html\n<h1>Hi</h1>\n```\n'
+    render(<MessageBubble message={{ id: 'a2', role: 'assistant', content: md }} />)
+    fireEvent.click(screen.getByRole('button', { name: '预览 HTML' }))
+    const src = usePreviewStore.getState().source
+    expect(src?.kind).toBe('html')
+    expect(src?.html).toContain('<h1>Hi</h1>')
+  })
+
+  it('shows no preview button when there is no html block', () => {
+    render(<MessageBubble message={{ id: 'a3', role: 'assistant', content: '```ts\nconst x=1\n```' }} />)
+    expect(screen.queryByRole('button', { name: '预览 HTML' })).toBeNull()
   })
 })
