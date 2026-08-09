@@ -7,6 +7,10 @@ export interface EditingAgent {
   path: string
 }
 
+// RightView selects which panel fills the right column: status tabs, the
+// read-only agent browser view, or the HTML preview.
+export type RightView = 'status' | 'browser' | 'preview'
+
 // uiStore holds cross-panel UI flags. settingsOpen drives the settings modal,
 // toggled from the sidebar gear and consumed by App. editingAgent drives the
 // drill-in sub-agent page inside that modal; it lives here rather than in the
@@ -19,6 +23,8 @@ interface UIState {
   closeSettings: () => void
   openAgent: (agent: EditingAgent) => void
   closeAgent: () => void
+  rightView: RightView
+  setRightView: (v: RightView) => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -30,4 +36,6 @@ export const useUIStore = create<UIState>((set) => ({
   closeSettings: () => set({ settingsOpen: false, editingAgent: null }),
   openAgent: (agent) => set({ editingAgent: agent }),
   closeAgent: () => set({ editingAgent: null }),
+  rightView: 'status',
+  setRightView: (v) => set({ rightView: v }),
 }))
