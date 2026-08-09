@@ -79,3 +79,33 @@ func TestReadWorkspaceFileRejectsOutsideRoot(t *testing.T) {
 		t.Fatal("expected error for path outside root")
 	}
 }
+
+func TestSearchWorkspaceContent(t *testing.T) {
+	root := t.TempDir()
+	os.WriteFile(filepath.Join(root, "a.txt"), []byte("hello world\nfoo bar"), 0o644)
+	os.WriteFile(filepath.Join(root, "b.md"), []byte("# nothing here"), 0o644)
+	os.WriteFile(filepath.Join(root, "c.bin"), []byte{0x00, 0x01}, 0o644)
+	a := NewApp("")
+	hits, err := a.SearchWorkspaceContent(root, "world")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || !strings.HasSuffix(hits[0].Path, "a.txt") || hits[0].Line != 1 {
+		t.Fatalf("got %+v", hits)
+	}
+}
+
+func TestSearchWorkspaceContentEmptyQuery(t *testing.T) {
+	root := t.TempDir()
+	a := NewApp("")
+	if _, err := a.SearchWorkspaceContent(root, ""); err == nil {
+		t.Fatal("expected error for empty query")
+	}
+}
+
+func TestSearchWorkspaceContentBadRoot(t *testing.T) {
+	a := NewApp("")
+	if _, err := a.SearchWorkspaceContent(filepath.Join(t.TempDir(), "does-not-exist"), "x"); err == nil {
+		t.Fatal("expected error for non-existent root")
+	}
+}

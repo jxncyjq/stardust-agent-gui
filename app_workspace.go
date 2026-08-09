@@ -137,3 +137,77 @@ func bytesContainNUL(b []byte) bool {
 	}
 	return false
 }
+
+const (
+	maxSearchFiles     = 2000
+	maxSearchFileBytes = 1 << 20 // 1 MiB
+	maxSearchHits      = 500
+)
+
+type SearchHit struct {
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Snippet string `json:"snippet"`
+}
+
+// SearchWorkspaceContent walks root recursively and returns line hits for query
+// (case-sensitive substring) across text files. It skips binary/oversize files
+// and caps files scanned / hits returned; a skip is a bounded, documented limit,
+// not a silent swallow. Fail-loud: empty query or a walk error returns an error.
+func (a *App) SearchWorkspaceContent(root, query string) ([]SearchHit, error) {
+	if strings.TrimSpace(query) == "" {
+		return nil, fmt.Errorf("search query is empty")
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve root %q: %w", root, err)
+	}
+	if info, err := os.Stat(absRoot); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("search root %q not a directory: %w", root, err)
+	}
+	hits := make([]SearchHit, 0, 64)
+	filesSeen := 0
+	err = filepath.WalkDir(absRoot, func(p string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return fmt.Errorf("walk %q: %w", p, walkErr)
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if filesSeen >= maxSearchFiles || len(hits) >= maxSearchHits {
+			return filepath.SkipAll
+		}
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("stat %q: %w", p, err)
+		}
+		if info.Size() > maxSearchFileBytes {
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return fmt.Errorf("read %q: %w", p, err)
+		}
+		if !utf8.Valid(data) || bytesContainNUL(data) {
+			return nil
+		}
+		filesSeen++
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(line, query) {
+				snippet := line
+				if len(snippet) > 200 {
+					snippet = snippet[:200]
+				}
+				hits = append(hits, SearchHit{Path: p, Line: i + 1, Snippet: strings.TrimSpace(snippet)})
+				if len(hits) >= maxSearchHits {
+					return filepath.SkipAll
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return hits, nil
+}
