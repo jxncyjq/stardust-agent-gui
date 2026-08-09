@@ -44,7 +44,11 @@ export function ListSessions():Promise<Array<Record<string, any>>>;
 
 export function ListTasks():Promise<Array<Record<string, any>>>;
 
+export function ListWorkspaceDir(arg1:string,arg2:string):Promise<Array<main.WorkspaceEntry>>;
+
 export function NewSession(arg1:string,arg2:string):Promise<Record<string, any>>;
+
+export function OpenInEditor(arg1:string,arg2:string):Promise<void>;
 
 export function PickDirectory():Promise<string>;
 
@@ -52,11 +56,17 @@ export function Port():Promise<number>;
 
 export function ReadHTMLFile(arg1:string):Promise<string>;
 
+export function ReadWorkspaceFile(arg1:string,arg2:string):Promise<main.WorkspaceFile>;
+
 export function RenameProject(arg1:string,arg2:string):Promise<void>;
 
 export function RenameSession(arg1:string,arg2:string):Promise<void>;
 
+export function RevealInExplorer(arg1:string):Promise<void>;
+
 export function SaveAll(arg1:string,arg2:Record<string, string>):Promise<void>;
+
+export function SearchWorkspaceContent(arg1:string,arg2:string):Promise<Array<main.SearchHit>>;
 
 export function SendAgentMessage(arg1:string,arg2:string):Promise<void>;
 

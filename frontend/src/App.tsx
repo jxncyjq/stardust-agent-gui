@@ -5,6 +5,7 @@ import { ChatPanel } from './components/ChatPanel'
 import { StatusPanel } from './components/StatusPanel'
 import { BrowserView } from './components/BrowserView'
 import { WebPreviewPanel } from './components/WebPreviewPanel'
+import { WorkspaceFilePanel } from './components/workspace/WorkspaceFilePanel'
 import { ConnectionBadge } from './components/ConnectionBadge'
 import { SettingsModal } from './components/settings/SettingsModal'
 import { ConfirmDialog } from './components/ConfirmDialog'
@@ -58,6 +59,7 @@ function RightPanel() {
     { id: 'status', label: '状态' },
     { id: 'browser', label: '浏览器' },
     { id: 'preview', label: '预览' },
+    { id: 'files', label: '文件' },
   ]
   return (
     <div className="flex flex-col h-full">
@@ -92,6 +94,7 @@ function RightPanel() {
             }}
           />
         )}
+        {view === 'files' && <WorkspaceFilePanel />}
       </div>
     </div>
   )

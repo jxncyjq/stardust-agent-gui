@@ -8,8 +8,9 @@ export interface EditingAgent {
 }
 
 // RightView selects which panel fills the right column: status tabs, the
-// read-only agent browser view, or the HTML preview.
-export type RightView = 'status' | 'browser' | 'preview'
+// read-only agent browser view, the HTML preview, or the workspace file
+// browser.
+export type RightView = 'status' | 'browser' | 'preview' | 'files'
 
 // uiStore holds cross-panel UI flags. settingsOpen drives the settings modal,
 // toggled from the sidebar gear and consumed by App. editingAgent drives the

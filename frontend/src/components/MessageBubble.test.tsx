@@ -115,8 +115,8 @@ describe('MessageBubble html preview button', () => {
     render(<MessageBubble message={{ id: 'a2', role: 'assistant', content: md }} />)
     fireEvent.click(screen.getByRole('button', { name: '预览 HTML' }))
     const src = usePreviewStore.getState().source
-    expect(src?.kind).toBe('html')
-    expect(src?.html).toContain('<h1>Hi</h1>')
+    if (src?.kind !== 'html') throw new Error('expected html preview source')
+    expect(src.html).toContain('<h1>Hi</h1>')
   })
 
   it('shows no preview button when there is no html block', () => {

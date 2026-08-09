@@ -40,3 +40,35 @@ export const rehypeShikiPlugin: [typeof rehypeShikiFromHighlighter, typeof highl
     themes: { light: 'github-light', dark: 'github-dark' },
   },
 ]
+
+// LOADED_LANGS mirrors the `langs` array passed to createHighlighter above.
+// The highlighter is built with an eagerly-loaded, FIXED language set — unlike
+// shiki's `bundledLanguages` (every language shiki ships), which is a superset
+// of what this instance actually has loaded. Checking against `bundledLanguages`
+// would let a "known to shiki but not loaded here" lang slip through and throw
+// at codeToHtml time. Checking against this loaded set instead guarantees the
+// fallback branch is taken for anything the highlighter cannot actually render.
+const LOADED_LANGS = new Set([
+  'typescript',
+  'javascript',
+  'tsx',
+  'go',
+  'json',
+  'bash',
+  'python',
+  'markdown',
+])
+
+// highlightToHtml renders a full code string to Shiki HTML (dual light/dark
+// themes, CSS-variable driven like the markdown plugin above). Used by the
+// file preview's `code` kind to highlight an entire file's contents directly
+// — going through the markdown/code-fence plugin would break on file content
+// that itself contains triple-backtick fences. Unknown/unloaded languages
+// fall back to plain text ('text') instead of throwing, so an arbitrary file
+// extension is always safe to pass through.
+export function highlightToHtml(code: string, lang: string): string {
+  return highlighter.codeToHtml(code, {
+    lang: LOADED_LANGS.has(lang) ? lang : 'text',
+    themes: { light: 'github-light', dark: 'github-dark' },
+  })
+}
