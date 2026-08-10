@@ -251,6 +251,55 @@ describe('ChatPanel sends images on the message', () => {
   })
 })
 
+// Task 6: generated_files (backend PR #76) rides along on both the history
+// replay path (GetSessionTurns) and the live completion path (GetTaskResult),
+// mapped via mapGeneratedFiles onto Message.generatedFiles. MessageBubble
+// already renders a FileCard per entry (file.name), so asserting the card
+// text is a faithful proxy for "the message carries generatedFiles".
+describe('ChatPanel carries generatedFiles from history replay', () => {
+  it('attaches generatedFiles from GetSessionTurns to the rebuilt assistant message', async () => {
+    mocks.GetSessionTurns.mockResolvedValue([
+      {
+        role: 'assistant',
+        content: '已生成文件',
+        created_at: '2026-01-01T00:00:00Z',
+        agent_id: 'default-agent',
+        generated_files: [
+          {
+            path: 'out/report.md',
+            url: '/v1/files/out/report.md',
+            download_url: '/v1/files/out/report.md?dl=1',
+            name: 'report.md',
+          },
+        ],
+      },
+    ])
+    seedSession()
+    render(<ChatPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByText('report.md')).toBeInTheDocument()
+    })
+    const assistant = useChatStore.getState().messages.find((m) => m.role === 'assistant')
+    expect(assistant?.generatedFiles?.length).toBe(1)
+    expect(assistant?.generatedFiles?.[0].name).toBe('report.md')
+  })
+
+  it('replayed history with no generated_files carries an empty array (no cards render)', async () => {
+    mocks.GetSessionTurns.mockResolvedValue([
+      { role: 'assistant', content: '普通回复', created_at: '2026-01-01T00:00:00Z', agent_id: 'default-agent' },
+    ])
+    seedSession()
+    render(<ChatPanel />)
+
+    await waitFor(() => {
+      expect(screen.getByText('普通回复')).toBeInTheDocument()
+    })
+    const assistant = useChatStore.getState().messages.find((m) => m.role === 'assistant')
+    expect(assistant?.generatedFiles).toEqual([])
+  })
+})
+
 describe('ChatPanel message list render budget (A3)', () => {
   it('renders only the last N messages and offers 显示更早 when over budget (A3)', async () => {
     seedSession()
@@ -541,6 +590,72 @@ describe('ChatPanel task-outcome wait', () => {
     // matching the non-streaming path rather than being silently dropped.
     const surfaced = useChatStore.getState().messages.some((m) => m.content.includes('仍在后端运行'))
     expect(surfaced).toBe(true)
+  })
+
+  it('attaches generatedFiles from GetTaskResult to the completed assistant message (streamed bubble path)', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-gf')
+    mocks.GetTaskResult.mockResolvedValue({
+      status: 'done',
+      result: '已生成文件',
+      total_tokens: 5,
+      generated_files: [
+        {
+          path: 'out/report.md',
+          url: '/v1/files/out/report.md',
+          download_url: '/v1/files/out/report.md?dl=1',
+          name: 'report.md',
+        },
+      ],
+    })
+    render(<ChatPanel />)
+
+    submit()
+    await flush()
+    // Stream a token first so this exercises the "streamed bubble finalized in
+    // place" branch, not the non-streaming append fallback.
+    await act(async () => {
+      emitAgentToken({ task_id: 'task-gf', message: '已生成文件' })
+    })
+    await flush()
+
+    await act(async () => {
+      emitAgentEvent({ type: 'task_completed', data: JSON.stringify({ task_id: 'task-gf' }) })
+    })
+    await flush()
+
+    const assistants = assistantMessages()
+    expect(assistants.length).toBe(1)
+    expect(assistants[0].generatedFiles?.length).toBe(1)
+    expect(assistants[0].generatedFiles?.[0].name).toBe('report.md')
+    expect(screen.getByText('report.md')).toBeInTheDocument()
+  })
+
+  it('attaches generatedFiles from GetTaskResult on the non-streaming append fallback path', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-gf2')
+    mocks.GetTaskResult.mockResolvedValue({
+      status: 'done',
+      result: '已生成文件2',
+      generated_files: [
+        { path: 'out/x.txt', url: '/v1/files/out/x.txt', download_url: '/v1/files/out/x.txt?dl=1', name: 'x.txt' },
+      ],
+    })
+    render(<ChatPanel />)
+
+    submit()
+    await flush()
+    // No token delta arrives: this task takes the non-streaming append path.
+    await act(async () => {
+      emitAgentEvent({ type: 'task_completed', data: JSON.stringify({ task_id: 'task-gf2' }) })
+    })
+    await flush()
+
+    const assistants = assistantMessages()
+    expect(assistants.length).toBe(1)
+    expect(assistants[0].generatedFiles?.length).toBe(1)
+    expect(assistants[0].generatedFiles?.[0].name).toBe('x.txt')
+    expect(screen.getByText('x.txt')).toBeInTheDocument()
   })
 
   it('unregisters its SSE listener with the handle EventsOn returned, not EventsOff', async () => {

@@ -50,6 +50,8 @@ export function NewSession(arg1:string,arg2:string):Promise<Record<string, any>>
 
 export function OpenInEditor(arg1:string,arg2:string):Promise<void>;
 
+export function OpenPath(arg1:string,arg2:string):Promise<void>;
+
 export function PickDirectory():Promise<string>;
 
 export function Port():Promise<number>;
@@ -65,6 +67,8 @@ export function RenameSession(arg1:string,arg2:string):Promise<void>;
 export function RevealInExplorer(arg1:string):Promise<void>;
 
 export function SaveAll(arg1:string,arg2:Record<string, string>):Promise<void>;
+
+export function SaveGeneratedFile(arg1:string,arg2:string):Promise<void>;
 
 export function SearchWorkspaceContent(arg1:string,arg2:string):Promise<Array<main.SearchHit>>;
 

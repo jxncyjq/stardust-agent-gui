@@ -7,6 +7,7 @@ import type { Message } from '../stores/chatStore'
 import { TerminalIcon, CopyIcon, DownloadIcon } from './icons'
 import { openLink } from '../lib/openLink'
 import { usePreviewStore } from '../stores/previewStore'
+import { FileCardList } from './FileCardList'
 
 interface Props {
   message: Message
@@ -156,6 +157,10 @@ export const MessageBubble = memo(function MessageBubble({ message }: Props) {
           </div>
         )
       })()}
+
+      {isAssistant && message.generatedFiles && message.generatedFiles.length > 0 && (
+        <FileCardList files={message.generatedFiles} />
+      )}
 
       {/* A prompt is as worth copying as a reply — re-sending a tweaked version
           is routine. Only copy applies here: saving a prompt as Markdown has no

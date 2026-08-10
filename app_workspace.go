@@ -3,11 +3,14 @@ package main
 import (
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const maxPreviewBytes = 2 << 20 // 2 MiB
@@ -293,6 +296,62 @@ func (a *App) RevealInExplorer(path string) error {
 	// explorer returns exit code 1 even on success; Start (not Run) avoids that.
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("launch explorer for %q: %w", abs, err)
+	}
+	return nil
+}
+
+// openPathArgv builds the argv to open a file with its OS-default program on
+// Windows via `cmd /c start "" <path>` — the empty "" is start's title slot so a
+// quoted path is not mistaken for a window title. abs is passed as ONE argv
+// element (no shell string building), so path metacharacters cannot inject.
+func openPathArgv(abs string) []string {
+	return []string{"cmd", "/c", "start", "", abs}
+}
+
+// OpenPath opens a generated file with the OS-default program (Word/Excel/…),
+// confined to the session workspace root. Fail-loud on out-of-root / launch err.
+func (a *App) OpenPath(root, relPath string) error {
+	abs, err := resolveInRoot(root, relPath)
+	if err != nil {
+		return fmt.Errorf("open path: %w", err)
+	}
+	argv := openPathArgv(abs)
+	if err := exec.Command(argv[0], argv[1:]...).Start(); err != nil {
+		return fmt.Errorf("open %q with default program: %w", abs, err)
+	}
+	return nil
+}
+
+// SaveGeneratedFile prompts for a destination and copies the generated file
+// there (Save As), confined to the workspace root. A cancelled dialog (empty
+// path) is a legitimate optional, not an error. Fail-loud on out-of-root / IO.
+func (a *App) SaveGeneratedFile(root, relPath string) error {
+	abs, err := resolveInRoot(root, relPath)
+	if err != nil {
+		return fmt.Errorf("save file: %w", err)
+	}
+	dest, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		DefaultFilename: filepath.Base(abs),
+		Title:           "保存文件",
+	})
+	if err != nil {
+		return fmt.Errorf("save dialog for %q: %w", abs, err)
+	}
+	if dest == "" {
+		return nil // user cancelled — legitimate optional
+	}
+	src, err := os.Open(abs)
+	if err != nil {
+		return fmt.Errorf("open source %q: %w", abs, err)
+	}
+	defer src.Close()
+	out, err := os.Create(dest)
+	if err != nil {
+		return fmt.Errorf("create dest %q: %w", dest, err)
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, src); err != nil {
+		return fmt.Errorf("copy %q to %q: %w", abs, dest, err)
 	}
 	return nil
 }

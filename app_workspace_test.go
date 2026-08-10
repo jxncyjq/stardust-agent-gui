@@ -139,3 +139,24 @@ func TestBuildEditorArgvEmptyTemplate(t *testing.T) {
 		t.Fatal("expected error for empty template")
 	}
 }
+
+func TestOpenPathRejectsOutsideRoot(t *testing.T) {
+	a := NewApp("")
+	if err := a.OpenPath(t.TempDir(), "../escape.txt"); err == nil {
+		t.Fatal("expected error for path outside root")
+	}
+}
+
+func TestSaveGeneratedFileRejectsOutsideRoot(t *testing.T) {
+	a := NewApp("")
+	if err := a.SaveGeneratedFile(t.TempDir(), "../../etc/passwd"); err == nil {
+		t.Fatal("expected error for path outside root")
+	}
+}
+
+func TestOpenPathArgv(t *testing.T) {
+	argv := openPathArgv(`C:\a b\x.docx`)
+	if len(argv) < 3 || argv[0] != "cmd" || argv[len(argv)-1] != `C:\a b\x.docx` {
+		t.Fatalf("got %#v", argv)
+	}
+}

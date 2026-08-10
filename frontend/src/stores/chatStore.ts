@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { GeneratedFile } from '../lib/generatedFiles'
 
 export interface MessageMeta {
   elapsedSec: number
@@ -31,6 +32,10 @@ export interface Message {
   // the bubble can replay them in-session. Optional and absent on assistant/
   // system messages and on history predating this field.
   images?: string[]
+  // generatedFiles are files the task produced (write_file), surfaced as cards
+  // under the assistant bubble. Absent on user/system messages and history
+  // predating the field.
+  generatedFiles?: GeneratedFile[]
 }
 
 interface ChatState {
