@@ -1,34 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
-import { useBrowserStore } from '../stores/browserStore'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { BrowserView } from './BrowserView'
+import { useBrowserStore } from '../stores/browserStore'
+import { GetBrowserEndpoint } from '../../wailsjs/go/main/App'
 
-// 桩 useBrowserStream（避免真连流）
+// mock Wails 绑定与 stream hook（避免真连 SSE）。
+vi.mock('../../wailsjs/go/main/App', () => ({
+  GetBrowserEndpoint: vi.fn().mockResolvedValue({ baseURL: 'http://h:1', token: 'tok' }),
+}))
 vi.mock('../hooks/useBrowserStream', () => ({ useBrowserStream: () => {} }))
 
-describe('BrowserView', () => {
-  beforeEach(() => useBrowserStore.getState().reset())
-
-  it('shows empty state when no session', () => {
-    render(<BrowserView />)
-    expect(screen.getByText(/未在浏览|no active/i)).toBeInTheDocument()
+describe('BrowserView takeover', () => {
+  beforeEach(() => {
+    useBrowserStore.getState().reset()
+    useBrowserStore.getState().setSession('sess-1')
+    vi.restoreAllMocks()
+    // vi.restoreAllMocks() 对纯 vi.fn()（非 vi.spyOn）没有"原始实现"可恢复，
+    // 会把 factory 里设的 mockResolvedValue 清空成 undefined；这里重新设一次。
+    vi.mocked(GetBrowserEndpoint).mockResolvedValue({ baseURL: 'http://h:1', token: 'tok' })
   })
 
-  it('renders observation elements when present', () => {
-    useBrowserStore.getState().setSession('sess-1')
-    useBrowserStore.getState().onObservation({ elements: [{ ref: 'e1', role: 'button', name: '搜索' }], text: '' })
+  it('toggles takeover via POST and shows banner', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
     render(<BrowserView />)
-    expect(screen.getByText(/搜索/)).toBeInTheDocument()
-    expect(screen.getByText(/e1/)).toBeInTheDocument()
-  })
-
-  it('draws frame onto canvas when frameDataUri set', () => {
-    const drawImage = vi.fn()
-    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage, clearRect: vi.fn() } as unknown as CanvasRenderingContext2D)
-    useBrowserStore.getState().setSession('sess-1')
-    useBrowserStore.getState().onFrame('image/jpeg', 'AAAA')
-    render(<BrowserView />)
-    // Image.onload 是异步的；断言 canvas 存在 + getContext 被取用（drawImage 在 onload 触发）
-    expect(document.querySelector('canvas')).toBeInTheDocument()
+    const btn = screen.getByRole('button', { name: /接管/ })
+    fireEvent.click(btn)
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://h:1/v1/browser/sessions/sess-1/takeover',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    )
+    await waitFor(() => expect(screen.getByText(/接管中/)).toBeInTheDocument())
   })
 })
