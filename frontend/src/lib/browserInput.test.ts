@@ -23,22 +23,33 @@ describe('Throttler', () => {
   })
 })
 
+// postInput/postTakeover now forward through the Go Wails bindings (not a
+// direct fetch), so mock the binding module and assert the arguments.
+const browserInputMock = vi.fn()
+const browserTakeoverMock = vi.fn()
+vi.mock('../../wailsjs/go/main/App', () => ({
+  BrowserInput: (id: string, events: string) => browserInputMock(id, events),
+  BrowserTakeover: (id: string, enabled: boolean) => browserTakeoverMock(id, enabled),
+}))
+
 describe('postInput / postTakeover', () => {
-  beforeEach(() => { vi.restoreAllMocks() })
-  it('POSTs input with bearer and events', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true })
-    vi.stubGlobal('fetch', fetchMock)
-    await postInput('http://h:1', 'tok', 'sess-1', [{ type: 'click', x: 0.5, y: 0.5, button: 'left' }])
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://h:1/v1/browser/sessions/sess-1/input',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({ Authorization: 'Bearer tok' }),
-      }),
+  beforeEach(() => {
+    browserInputMock.mockReset().mockResolvedValue(undefined)
+    browserTakeoverMock.mockReset().mockResolvedValue(undefined)
+  })
+  it('forwards input events as a JSON string via the binding', async () => {
+    await postInput('sess-1', [{ type: 'click', x: 0.5, y: 0.5, button: 'left' }])
+    expect(browserInputMock).toHaveBeenCalledWith(
+      'sess-1',
+      JSON.stringify([{ type: 'click', x: 0.5, y: 0.5, button: 'left' }]),
     )
   })
-  it('throws loud on non-ok', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 409 }))
-    await expect(postTakeover('http://h:1', '', 'sess-1', true)).rejects.toThrow(/409/)
+  it('forwards takeover toggle via the binding', async () => {
+    await postTakeover('sess-1', true)
+    expect(browserTakeoverMock).toHaveBeenCalledWith('sess-1', true)
+  })
+  it('propagates a binding rejection (fail-loud)', async () => {
+    browserTakeoverMock.mockRejectedValue(new Error('post takeover: status 409'))
+    await expect(postTakeover('sess-1', true)).rejects.toThrow(/409/)
   })
 })

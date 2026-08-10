@@ -564,6 +564,65 @@ func stringField(raw map[string]any, key string) string {
 // returns the response bytes and status code. The body is fully drained so the
 // pooled connection is reused. Transport errors are wrapped; HTTP status is left
 // for the caller to interpret so each binding can fail loud with context.
+// BrowserTakeover toggles manual takeover for a browser session. The POST goes
+// through the Go side, not a direct webview fetch: a cross-origin
+// application/json POST from the webview triggers a CORS preflight that the
+// random-port local serve answers with 404 (it registers no OPTIONS handler),
+// so the takeover button silently did nothing. Routing through Go — the same
+// reason SubmitTask does — skips the preflight entirely.
+func (a *App) BrowserTakeover(sessionID string, enabled bool) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	return a.browserPost("/v1/browser/sessions/"+sessionID+"/takeover", map[string]any{"enabled": enabled})
+}
+
+// BrowserInput injects a batch of input events into a taken-over session (same
+// CORS-avoidance rationale as BrowserTakeover). eventsJSON is the JSON array of
+// input events built by the frontend; it is embedded verbatim as the "events"
+// field so the Go side stays a thin, type-agnostic forwarder rather than
+// duplicating the InputEvent shape.
+func (a *App) BrowserInput(sessionID string, eventsJSON string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if !json.Valid([]byte(eventsJSON)) {
+		return fmt.Errorf("events payload is not valid JSON")
+	}
+	return a.browserPost("/v1/browser/sessions/"+sessionID+"/input", map[string]any{"events": json.RawMessage(eventsJSON)})
+}
+
+// browserPost POSTs a JSON body to the local serve with the loopback bearer
+// token (mirroring apiGet's auth), returning an error for transport failures or
+// any non-2xx status so the caller (and the React button handler) can surface a
+// failed takeover/input instead of swallowing it.
+func (a *App) browserPost(path string, body any) error {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal %s request: %w", path, err)
+	}
+	req, err := http.NewRequest(http.MethodPost, a.BaseURL()+path, strings.NewReader(string(payload)))
+	if err != nil {
+		return fmt.Errorf("build %s request: %w", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if tok := a.serve.Token(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("post %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("post %s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(msg)))
+	}
+	return nil
+}
+
 func (a *App) postJSON(path string, body map[string]any) ([]byte, int, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {

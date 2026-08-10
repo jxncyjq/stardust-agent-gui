@@ -6,6 +6,14 @@ export function BaseURL() {
   return window['go']['main']['App']['BaseURL']();
 }
 
+export function BrowserInput(arg1, arg2) {
+  return window['go']['main']['App']['BrowserInput'](arg1, arg2);
+}
+
+export function BrowserTakeover(arg1, arg2) {
+  return window['go']['main']['App']['BrowserTakeover'](arg1, arg2);
+}
+
 export function DecideApproval(arg1, arg2, arg3) {
   return window['go']['main']['App']['DecideApproval'](arg1, arg2, arg3);
 }

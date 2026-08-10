@@ -1,5 +1,7 @@
 // browserInput 负责接管模式下把 DOM 鼠标/键盘事件映射为后端归一化 InputEvent，
-// 并经 fetch+bearer POST 到会话端点。坐标只发 0..1，后端 × 视口 px。
+// 并经 Go Wails binding POST 到会话端点（避开 webview 直发的 CORS 预检）。
+// 坐标只发 0..1，后端 × 视口 px。
+import { BrowserInput, BrowserTakeover } from '../../wailsjs/go/main/App'
 
 export interface InputEvent {
   type: string
@@ -38,31 +40,20 @@ export class Throttler {
   }
 }
 
-// postInput 注入一批事件；非 2xx 抛错（fail-loud，让调用方提示注入失败）。
-export async function postInput(
-  baseURL: string,
-  token: string,
-  sessionId: string,
-  events: InputEvent[],
-): Promise<void> {
-  await postJSON(`${baseURL}/v1/browser/sessions/${sessionId}/input`, token, { events })
+// postInput/postTakeover forward through the Go Wails bindings, not a direct
+// webview fetch. A cross-origin application/json POST from the webview to the
+// random-port local serve triggers a CORS preflight the serve answers with 404
+// (no OPTIONS handler), so the takeover button and input injection silently did
+// nothing. The Go side (BrowserTakeover/BrowserInput) issues the POST with the
+// loopback bearer token and no preflight. Both bindings reject on a non-2xx
+// serve response, so failures still surface (fail-loud) to the caller.
+
+// postInput 注入一批事件；binding 在后端非 2xx 时 reject（fail-loud）。
+export async function postInput(sessionId: string, events: InputEvent[]): Promise<void> {
+  await BrowserInput(sessionId, JSON.stringify(events))
 }
 
 // postTakeover 置/清接管标志。
-export async function postTakeover(
-  baseURL: string,
-  token: string,
-  sessionId: string,
-  enabled: boolean,
-): Promise<void> {
-  await postJSON(`${baseURL}/v1/browser/sessions/${sessionId}/takeover`, token, { enabled })
-}
-
-async function postJSON(url: string, token: string, body: unknown): Promise<void> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (token) headers['Authorization'] = `Bearer ${token}`
-  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) })
-  if (!res.ok) {
-    throw new Error(`browser POST ${url}: HTTP ${res.status}`)
-  }
+export async function postTakeover(sessionId: string, enabled: boolean): Promise<void> {
+  await BrowserTakeover(sessionId, enabled)
 }
