@@ -66,7 +66,15 @@ func (a *App) startup(ctx context.Context) {
 		// on every reconnect: SaveAll can restart the embedded service on a new
 		// random port (see ServeManager.Restart), and a cached URL would leave
 		// the bridge dialing the old, now-dead port forever.
-		StartSSEBridge(ctx, ctx, a.BaseURL, a.serve.Token)
+		// The browser screencast stream is consumed Go-side (not by the React
+		// webview's fetch reader, which cannot read a long-lived event-stream
+		// body under WebView2) and forwarded to React as Wails events. The
+		// manager starts/stops a per-session consumer off the browser session
+		// lifecycle events the SSE bridge already sees.
+		browserStream := NewBrowserStreamManager(a.BaseURL, a.serve.Token, func(event string, data any) {
+			runtime.EventsEmit(ctx, event, data)
+		})
+		StartSSEBridge(ctx, ctx, a.BaseURL, a.serve.Token, browserStream)
 	}
 	a.writeStartupLog(err)
 }

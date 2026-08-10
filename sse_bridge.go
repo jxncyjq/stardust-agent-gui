@@ -36,17 +36,32 @@ const sseRetryDelay = 2 * time.Second
 // *and* mints a new token, so a token captured at startup would be rejected
 // with 403 after a restart. tokenFn returning "" (non-hardened serve) means no
 // Authorization header is sent.
-func StartSSEBridge(ctx context.Context, appCtx context.Context, baseURLFn func() string, tokenFn func() string) {
+func StartSSEBridge(ctx context.Context, appCtx context.Context, baseURLFn func() string, tokenFn func() string, browserStream *BrowserStreamManager) {
+	// onBrowserSession drives the Go-side per-session frame bridge off the same
+	// lifecycle events the view already reacts to: start consuming a session's
+	// screencast stream when it opens, stop when it closes. Nil-safe so a build
+	// without a manager keeps the plain event forwarding.
+	onBrowserSession := func(eventType, sessionID string) {
+		if browserStream == nil {
+			return
+		}
+		switch eventType {
+		case "browser:session_opened":
+			browserStream.Start(ctx, sessionID)
+		case "browser:session_closed":
+			browserStream.Stop(sessionID)
+		}
+	}
 	startSSEBridge(ctx, baseURLFn, tokenFn, func(event string, data any) {
 		runtime.EventsEmit(appCtx, event, data)
-	})
+	}, onBrowserSession)
 }
 
 // startSSEBridge is the testable core of StartSSEBridge. emit is injected
 // (rather than calling runtime.EventsEmit directly) because the Wails runtime
 // requires a live app context that tests cannot construct; production code
 // goes through StartSSEBridge, which binds emit to runtime.EventsEmit.
-func startSSEBridge(ctx context.Context, baseURLFn func() string, tokenFn func() string, emit func(event string, data any)) {
+func startSSEBridge(ctx context.Context, baseURLFn func() string, tokenFn func() string, emit func(event string, data any), onBrowserSession func(eventType, sessionID string)) {
 	go func() {
 		for {
 			if err := ctx.Err(); err != nil {
@@ -56,7 +71,7 @@ func startSSEBridge(ctx context.Context, baseURLFn func() string, tokenFn func()
 			// Read the token on every reconnect (not captured once): a Restart
 			// rebinds on a new port and mints a fresh token, so a stale token
 			// would be rejected 403 by the hardened serve.
-			err := consumeSSEWithToken(ctx, url, tokenFn(), emit)
+			err := consumeSSEWithToken(ctx, url, tokenFn(), emit, onBrowserSession)
 			if ctx.Err() != nil {
 				return
 			}
@@ -81,7 +96,7 @@ func startSSEBridge(ctx context.Context, baseURLFn func() string, tokenFn func()
 // bearer token. It is a thin back-compat wrapper over consumeSSEWithToken for
 // callers (and tests) that target a non-hardened serve.
 func consumeSSE(ctx context.Context, url string, emit func(event string, data any)) error {
-	return consumeSSEWithToken(ctx, url, "", emit)
+	return consumeSSEWithToken(ctx, url, "", emit, nil)
 }
 
 // consumeSSEWithToken performs a single SSE connection attempt against url,
@@ -93,7 +108,7 @@ func consumeSSE(ctx context.Context, url string, emit func(event string, data an
 // attempt ended (including ctx cancellation) so the caller can log/retry
 // uniformly; the caller is responsible for checking ctx.Err() to distinguish a
 // shutdown from a real failure.
-func consumeSSEWithToken(ctx context.Context, url, token string, emit func(event string, data any)) error {
+func consumeSSEWithToken(ctx context.Context, url, token string, emit func(event string, data any), onBrowserSession func(eventType, sessionID string)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("build SSE request for %s: %w", url, err)
@@ -164,6 +179,20 @@ func consumeSSEWithToken(ctx context.Context, url, token string, emit func(event
 						"type": eventType,
 						"data": data,
 					})
+					// Drive the Go-side frame bridge off the same lifecycle: start
+					// consuming this session's screencast stream when it opens, stop
+					// when it closes. Parsing the session id here keeps the manager
+					// transport-only; a payload without one is skipped fail-loud.
+					if onBrowserSession != nil {
+						var env struct {
+							SessionID string `json:"session_id"`
+						}
+						if err := json.Unmarshal([]byte(data), &env); err != nil {
+							fmt.Fprintf(os.Stderr, "sse bridge: browser session payload not JSON (%q): %v\n", data, err)
+						} else if env.SessionID != "" {
+							onBrowserSession(eventType, env.SessionID)
+						}
+					}
 				}
 			}
 			eventType = ""
