@@ -3,9 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { MessageBubble } from './MessageBubble'
 import { usePreviewStore } from '../stores/previewStore'
+import { useSessionStore } from '../stores/sessionStore'
 
 const runtimeMocks = vi.hoisted(() => ({ BrowserOpenURL: vi.fn() }))
 vi.mock('../../wailsjs/runtime/runtime', () => runtimeMocks)
+
+const appMocks = vi.hoisted(() => ({ OpenPath: vi.fn(), SaveGeneratedFile: vi.fn(), GetBrowserEndpoint: vi.fn() }))
+vi.mock('../../wailsjs/go/main/App', () => appMocks)
 
 describe('MessageBubble agent label', () => {
   // The answering agent is chosen per submission, so it is labelled on the
@@ -122,5 +126,21 @@ describe('MessageBubble html preview button', () => {
   it('shows no preview button when there is no html block', () => {
     render(<MessageBubble message={{ id: 'a3', role: 'assistant', content: '```ts\nconst x=1\n```' }} />)
     expect(screen.queryByRole('button', { name: '预览 HTML' })).toBeNull()
+  })
+})
+
+describe('MessageBubble generated file cards', () => {
+  beforeEach(() => {
+    useSessionStore.setState({ currentSessionId: 's1', sessions: [{ id: 's1', project: 'p', title: 't', archived: false, updatedAt: '', workingDir: 'F:/w' }] })
+  })
+
+  it('renders a card for an assistant message with generatedFiles', () => {
+    render(<MessageBubble message={{ id: 'a1', role: 'assistant', content: 'done', generatedFiles: [{ path: 'a.html', url: '/v1/files?x', downloadUrl: '/v1/files?x&download=1', name: 'a.html' }] }} />)
+    expect(screen.getByText('a.html')).toBeInTheDocument()
+  })
+
+  it('renders no card when none', () => {
+    render(<MessageBubble message={{ id: 'a2', role: 'assistant', content: 'hi' }} />)
+    expect(screen.queryByText('a.html')).toBeNull()
   })
 })
