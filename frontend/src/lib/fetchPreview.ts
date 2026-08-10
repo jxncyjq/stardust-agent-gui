@@ -1,45 +1,28 @@
-import { GetBrowserEndpoint } from '../../wailsjs/go/main/App'
+import { FetchPreviewFile } from '../../wailsjs/go/main/App'
 import type { PreviewSource } from '../stores/previewStore'
 import type { GeneratedFile } from './generatedFiles'
 
-const LANG_BY_EXT: Record<string, string> = {
-  ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx', go: 'go', json: 'json',
-  sh: 'bash', py: 'python', css: 'css', yaml: 'yaml', yml: 'yaml', toml: 'toml',
-}
-const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'])
-
-function extOf(name: string): string {
-  return name.split('.').pop()?.toLowerCase() ?? ''
-}
-
-// fetchPreview loads a generated file via the backend /v1/files endpoint (with
-// the current loopback token) and maps it to a PreviewSource for PreviewContent.
-// Relative urls are resolved against the live baseURL from GetBrowserEndpoint so
-// a serve restart (new port) never breaks the link. Throws on non-2xx / network.
-export async function fetchPreview(file: GeneratedFile): Promise<PreviewSource> {
-  const { baseURL, token } = await GetBrowserEndpoint()
-  const full = /^https?:\/\//i.test(file.url) ? file.url : baseURL + file.url
-  const resp = await fetch(full, token ? { headers: { Authorization: 'Bearer ' + token } } : {})
-  if (!resp.ok) {
-    throw new Error(`preview fetch ${file.name} failed: ${resp.status}`)
+// fetchPreview loads a generated file for preview THROUGH the Go side
+// (FetchPreviewFile), which makes an authed request to the embedded service's
+// /v1/files endpoint. It deliberately does NOT fetch from the frontend: the
+// Wails webview origin is cross-origin to the loopback server, and that fetch is
+// blocked by CORS (surfaces as net::ERR_FAILED / a spurious 304). Going through
+// Go reuses the pooled authed client and sidesteps CORS entirely — the same
+// reason every other GUI API call routes through Go. The server resolves the
+// session's working dir from sessionID, so no local root is needed here.
+export async function fetchPreview(file: GeneratedFile, sessionID: string): Promise<PreviewSource> {
+  const wf = await FetchPreviewFile(sessionID, file.path)
+  switch (wf.kind) {
+    case 'image':
+      return { kind: 'image', dataUri: wf.dataURI, title: file.name, path: file.path }
+    case 'html':
+      return { kind: 'html', html: wf.text, title: file.name, sourceUrl: file.url }
+    case 'markdown':
+      return { kind: 'markdown', text: wf.text, title: file.name, path: file.path }
+    case 'binary':
+      return { kind: 'binary', title: file.name, path: file.path }
+    default:
+      // 'code' (and any unknown Kind) render as highlighted text.
+      return { kind: 'code', text: wf.text, lang: wf.lang || 'text', title: file.name, path: file.path }
   }
-  const ext = extOf(file.name)
-  if (IMAGE_EXT.has(ext)) {
-    const blob = await resp.blob()
-    const dataUri = await new Promise<string>((resolve, reject) => {
-      const fr = new FileReader()
-      fr.onload = () => resolve(String(fr.result))
-      fr.onerror = () => reject(fr.error)
-      fr.readAsDataURL(blob)
-    })
-    return { kind: 'image', dataUri, title: file.name, path: file.path }
-  }
-  const text = await resp.text()
-  if (ext === 'html' || ext === 'htm') {
-    return { kind: 'html', html: text, title: file.name, sourceUrl: file.url }
-  }
-  if (ext === 'md' || ext === 'markdown') {
-    return { kind: 'markdown', text, title: file.name, path: file.path }
-  }
-  return { kind: 'code', text, lang: LANG_BY_EXT[ext] ?? 'text', title: file.name, path: file.path }
 }

@@ -10,6 +10,8 @@ export function DeleteProject(arg1:string):Promise<void>;
 
 export function DeleteSession(arg1:string):Promise<void>;
 
+export function FetchPreviewFile(arg1:string,arg2:string):Promise<main.WorkspaceFile>;
+
 export function GetAgentConfig(arg1:string):Promise<main.AgentConfigResult>;
 
 export function GetAgentModelInfo(arg1:string):Promise<main.ModelInfo>;

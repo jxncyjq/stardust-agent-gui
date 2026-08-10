@@ -1,4 +1,4 @@
-import { OpenPath, SaveGeneratedFile } from '../../wailsjs/go/main/App'
+import { GetBrowserEndpoint, OpenPath, SaveGeneratedFile } from '../../wailsjs/go/main/App'
 import { fetchPreview } from '../lib/fetchPreview'
 import { isPreviewable, type GeneratedFile } from '../lib/generatedFiles'
 import { usePreviewStore } from '../stores/previewStore'
@@ -19,11 +19,14 @@ interface FileCardProps {
 // "should exist but doesn't" state (this is a legitimate optional/unbound
 // state, not an error, hence disabled + title hint rather than a thrown error).
 export function FileCard({ file }: FileCardProps) {
+  const currentSessionId = useSessionStore((s) => s.currentSessionId)
   const root = useSessionStore((s) => s.sessions.find((x) => x.id === s.currentSessionId)?.workingDir)
   const canPreview = isPreviewable(file.name)
 
   const handlePreview = () => {
-    fetchPreview(file).then(usePreviewStore.getState().open).catch(console.error)
+    // Preview goes through the Go side (fetchPreview → FetchPreviewFile) which
+    // resolves the file from the current session — no cross-origin frontend fetch.
+    fetchPreview(file, currentSessionId ?? '').then(usePreviewStore.getState().open).catch(console.error)
   }
   const handleOpenExternal = () => {
     if (!root) return
@@ -34,7 +37,18 @@ export function FileCard({ file }: FileCardProps) {
     Promise.resolve(SaveGeneratedFile(root, file.path)).catch(console.error)
   }
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(file.url)
+    // file.url is relative ("/v1/files?...") when server.file_base_url is unset;
+    // copying the bare relative path is useless outside the app, so resolve it to
+    // an absolute URL against the live base. Absolute urls (configured domain)
+    // pass through unchanged.
+    void (async () => {
+      let link = file.url
+      if (!/^https?:\/\//i.test(link)) {
+        const { baseURL } = await GetBrowserEndpoint()
+        link = baseURL + link
+      }
+      await navigator.clipboard.writeText(link)
+    })().catch(console.error)
   }
 
   return (

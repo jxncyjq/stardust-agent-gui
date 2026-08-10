@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,6 +133,68 @@ func (a *App) ReadWorkspaceFile(root, path string) (WorkspaceFile, error) {
 		}
 		return WorkspaceFile{Kind: "code", Text: text, Lang: lang}, nil
 	}
+}
+
+// mapWorkspaceBytes classifies raw file bytes into a WorkspaceFile by extension:
+// image → base64 data URI; non-UTF8 / NUL → binary; .md → markdown; .html →
+// html; else code (shiki lang by ext, "text" fallback). Shared by the local
+// read and the server-fetch preview paths.
+func mapWorkspaceBytes(ext string, data []byte) WorkspaceFile {
+	if mime, ok := imageExt[ext]; ok {
+		return WorkspaceFile{Kind: "image", DataURI: "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)}
+	}
+	if !utf8.Valid(data) || bytesContainNUL(data) {
+		return WorkspaceFile{Kind: "binary"}
+	}
+	text := string(data)
+	switch ext {
+	case ".md", ".markdown":
+		return WorkspaceFile{Kind: "markdown", Text: text}
+	case ".html", ".htm":
+		return WorkspaceFile{Kind: "html", Text: text}
+	default:
+		lang := langByExt[ext]
+		if lang == "" {
+			lang = "text"
+		}
+		return WorkspaceFile{Kind: "code", Text: text, Lang: lang}
+	}
+}
+
+// FetchPreviewFile fetches a generated file through the embedded service's
+// /v1/files endpoint (a Go-side authed request — the Wails webview blocks a
+// cross-origin frontend fetch to the loopback server, so preview must go through
+// Go) and maps the bytes to a WorkspaceFile. The server resolves the session's
+// working dir from sessionID, so the frontend needs no local root. Fail-loud on
+// non-2xx / read / oversize. This is the "download to memory then read" path.
+func (a *App) FetchPreviewFile(sessionID, relPath string) (WorkspaceFile, error) {
+	q := url.Values{}
+	q.Set("session_id", sessionID)
+	q.Set("path", relPath)
+	req, err := http.NewRequest(http.MethodGet, a.BaseURL()+"/v1/files?"+q.Encode(), nil)
+	if err != nil {
+		return WorkspaceFile{}, fmt.Errorf("build preview request for %q: %w", relPath, err)
+	}
+	// Read the token per call (a Restart mints a fresh one); empty = non-hardened.
+	if tok := a.serve.Token(); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return WorkspaceFile{}, fmt.Errorf("fetch preview %q: %w", relPath, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return WorkspaceFile{}, fmt.Errorf("fetch preview %q: status %d", relPath, resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxPreviewBytes+1))
+	if err != nil {
+		return WorkspaceFile{}, fmt.Errorf("read preview %q: %w", relPath, err)
+	}
+	if len(data) > maxPreviewBytes {
+		return WorkspaceFile{}, fmt.Errorf("preview %q too large (> %d bytes)", relPath, maxPreviewBytes)
+	}
+	return mapWorkspaceBytes(strings.ToLower(filepath.Ext(relPath)), data), nil
 }
 
 func bytesContainNUL(b []byte) bool {

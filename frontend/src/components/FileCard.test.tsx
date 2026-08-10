@@ -50,10 +50,11 @@ it('download calls SaveGeneratedFile', () => {
   expect(appMocks.SaveGeneratedFile).toHaveBeenCalledWith('F:/w', 'r.docx')
 })
 
-it('copy link writes url to clipboard', async () => {
+it('copy link resolves a relative url to absolute and copies it', async () => {
+  appMocks.GetBrowserEndpoint.mockResolvedValue({ baseURL: 'http://127.0.0.1:9000', token: 't' })
   const writeText = vi.fn().mockResolvedValue(undefined)
   vi.stubGlobal('navigator', { clipboard: { writeText } })
   render(<FileCard file={html} />)
   fireEvent.click(screen.getByRole('button', { name: '复制链接' }))
-  expect(writeText).toHaveBeenCalledWith('/v1/files?x')
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://127.0.0.1:9000/v1/files?x'))
 })

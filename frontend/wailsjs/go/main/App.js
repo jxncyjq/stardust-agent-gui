@@ -18,6 +18,10 @@ export function DeleteSession(arg1) {
   return window['go']['main']['App']['DeleteSession'](arg1);
 }
 
+export function FetchPreviewFile(arg1, arg2) {
+  return window['go']['main']['App']['FetchPreviewFile'](arg1, arg2);
+}
+
 export function GetAgentConfig(arg1) {
   return window['go']['main']['App']['GetAgentConfig'](arg1);
 }

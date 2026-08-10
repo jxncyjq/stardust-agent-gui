@@ -1,39 +1,45 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const appMocks = vi.hoisted(() => ({ GetBrowserEndpoint: vi.fn() }))
+const appMocks = vi.hoisted(() => ({ FetchPreviewFile: vi.fn() }))
 vi.mock('../../wailsjs/go/main/App', () => appMocks)
 
 import { fetchPreview } from './fetchPreview'
 
-describe('fetchPreview', () => {
-  beforeEach(() => {
-    appMocks.GetBrowserEndpoint.mockReset()
-    appMocks.GetBrowserEndpoint.mockResolvedValue({ baseURL: 'http://127.0.0.1:9000', token: 'tok' })
-    vi.stubGlobal('fetch', vi.fn())
-  })
+beforeEach(() => appMocks.FetchPreviewFile.mockReset())
 
-  it('resolves relative url against baseURL and sends bearer token', async () => {
-    ;(fetch as any).mockResolvedValue(new Response('<h1>hi</h1>', { headers: { 'Content-Type': 'text/html' } }))
-    const src = await fetchPreview({ path: 'a.html', url: '/v1/files?x', downloadUrl: '', name: 'a.html' })
-    expect((fetch as any).mock.calls[0][0]).toBe('http://127.0.0.1:9000/v1/files?x')
-    expect((fetch as any).mock.calls[0][1].headers.Authorization).toBe('Bearer tok')
-    expect(src).toEqual({ kind: 'html', html: '<h1>hi</h1>', title: 'a.html', sourceUrl: '/v1/files?x' })
-  })
+const file = (name: string) => ({ path: name, url: '/v1/files?x', downloadUrl: '/v1/files?x&download=1', name })
 
-  it('builds markdown source for .md', async () => {
-    ;(fetch as any).mockResolvedValue(new Response('# t', { headers: { 'Content-Type': 'text/markdown' } }))
-    const src = await fetchPreview({ path: 'd.md', url: '/v1/files?y', downloadUrl: '', name: 'd.md' })
-    expect(src.kind).toBe('markdown')
-  })
-
-  it('builds code source for .ts', async () => {
-    ;(fetch as any).mockResolvedValue(new Response('const x=1', { headers: { 'Content-Type': 'text/plain' } }))
-    const src = await fetchPreview({ path: 'a.ts', url: '/v1/files?z', downloadUrl: '', name: 'a.ts' })
-    expect(src.kind).toBe('code')
-  })
-
-  it('throws on non-ok response', async () => {
-    ;(fetch as any).mockResolvedValue(new Response('nope', { status: 404 }))
-    await expect(fetchPreview({ path: 'a.html', url: '/v1/files?x', downloadUrl: '', name: 'a.html' })).rejects.toThrow()
-  })
+it('calls FetchPreviewFile with sessionID + path', async () => {
+  appMocks.FetchPreviewFile.mockResolvedValue({ kind: 'html', text: '<h1>hi</h1>', dataURI: '', lang: '' })
+  await fetchPreview(file('a.html'), 's1')
+  expect(appMocks.FetchPreviewFile).toHaveBeenCalledWith('s1', 'a.html')
 })
+
+it('maps html WorkspaceFile to an html PreviewSource', async () => {
+  appMocks.FetchPreviewFile.mockResolvedValue({ kind: 'html', text: '<h1>hi</h1>', dataURI: '', lang: '' })
+  const src = await fetchPreview(file('a.html'), 's1')
+  expect(src).toEqual({ kind: 'html', html: '<h1>hi</h1>', title: 'a.html', sourceUrl: '/v1/files?x' })
+})
+
+it('maps markdown', async () => {
+  appMocks.FetchPreviewFile.mockResolvedValue({ kind: 'markdown', text: '# t', dataURI: '', lang: '' })
+  const src = await fetchPreview(file('d.md'), 's1')
+  expect(src.kind).toBe('markdown')
+})
+
+it('maps code with lang', async () => {
+  appMocks.FetchPreviewFile.mockResolvedValue({ kind: 'code', text: 'const x=1', dataURI: '', lang: 'typescript' })
+  const src = await fetchPreview(file('a.ts'), 's1')
+  expect(src).toEqual({ kind: 'code', text: 'const x=1', lang: 'typescript', title: 'a.ts', path: 'a.ts' })
+})
+
+it('maps image dataURI', async () => {
+  appMocks.FetchPreviewFile.mockResolvedValue({ kind: 'image', text: '', dataURI: 'data:image/png;base64,AAA', lang: '' })
+  const src = await fetchPreview(file('i.png'), 's1')
+  expect(src).toEqual({ kind: 'image', dataUri: 'data:image/png;base64,AAA', title: 'i.png', path: 'i.png' })
+})
+
+// Error propagation is intentionally not swallowed: fetchPreview is a bare
+// `await FetchPreviewFile(...)` + mapping, so a Go-side error (non-2xx / read
+// failure — asserted in app_workspace_test.go) rejects straight through to the
+// caller, which surfaces it (FileCard's handlePreview .catch(console.error)).
