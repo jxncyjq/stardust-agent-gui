@@ -15,18 +15,20 @@ interface BrowserState {
   progress: { action: string; status: string; ref?: string } | null
   connected: boolean
   lastEventId: number
+  takeover: boolean
   setSession: (id: string | null) => void
   onFrame: (mime: string, b64: string) => void
   onObservation: (obs: { elements: BrowserElement[]; text: string }) => void
   onProgress: (p: { action: string; status: string; ref?: string }) => void
   setConnected: (c: boolean) => void
   setLastEventId: (id: number) => void
+  setTakeover: (v: boolean) => void
   reset: () => void
 }
 
 const empty = {
   frameDataUri: null, elements: [] as BrowserElement[], observationText: '',
-  progress: null, connected: false, lastEventId: 0,
+  progress: null, connected: false, lastEventId: 0, takeover: false,
 }
 
 export const useBrowserStore = create<BrowserState>((set) => ({
@@ -38,5 +40,6 @@ export const useBrowserStore = create<BrowserState>((set) => ({
   onProgress: (p) => set({ progress: p }),
   setConnected: (c) => set({ connected: c }),
   setLastEventId: (id) => set({ lastEventId: id }),
+  setTakeover: (v) => set({ takeover: v }),
   reset: () => set({ sessionId: null, ...empty }),
 }))

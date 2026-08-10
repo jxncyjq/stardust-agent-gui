@@ -23,3 +23,20 @@ describe('browserStore', () => {
     expect(useBrowserStore.getState().observationText).toContain('e1')
   })
 })
+
+describe('browserStore takeover', () => {
+  beforeEach(() => useBrowserStore.getState().reset())
+  it('defaults to false', () => {
+    expect(useBrowserStore.getState().takeover).toBe(false)
+  })
+  it('setTakeover toggles', () => {
+    useBrowserStore.getState().setTakeover(true)
+    expect(useBrowserStore.getState().takeover).toBe(true)
+  })
+  it('clears takeover when session cleared', () => {
+    useBrowserStore.getState().setSession('sess-1')
+    useBrowserStore.getState().setTakeover(true)
+    useBrowserStore.getState().setSession(null)
+    expect(useBrowserStore.getState().takeover).toBe(false)
+  })
+})
