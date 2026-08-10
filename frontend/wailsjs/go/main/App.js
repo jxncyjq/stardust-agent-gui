@@ -98,6 +98,10 @@ export function OpenInEditor(arg1, arg2) {
   return window['go']['main']['App']['OpenInEditor'](arg1, arg2);
 }
 
+export function OpenPath(arg1, arg2) {
+  return window['go']['main']['App']['OpenPath'](arg1, arg2);
+}
+
 export function PickDirectory() {
   return window['go']['main']['App']['PickDirectory']();
 }
@@ -128,6 +132,10 @@ export function RevealInExplorer(arg1) {
 
 export function SaveAll(arg1, arg2) {
   return window['go']['main']['App']['SaveAll'](arg1, arg2);
+}
+
+export function SaveGeneratedFile(arg1, arg2) {
+  return window['go']['main']['App']['SaveGeneratedFile'](arg1, arg2);
 }
 
 export function SearchWorkspaceContent(arg1, arg2) {
