@@ -28,6 +28,7 @@ import { ModeSelector } from './ModeSelector'
 import { ModelBadge } from './ModelBadge'
 import { ApprovalPrompt } from './ApprovalPrompt'
 import { useAgentStore } from '../stores/agentStore'
+import { mapGeneratedFiles, type GeneratedFile } from '../lib/generatedFiles'
 
 // ChatEmptyState fills the message area before the first message: it gives the
 // otherwise-blank pane an identity, tells the user how to send, and surfaces a
@@ -98,6 +99,10 @@ type TaskOutcome = {
   completionTokens: number
   cachedTokens: number
   timedOut: boolean
+  // generatedFiles are files the task wrote (write_file), carried by
+  // GetTaskResult's generated_files field (backend PR #76). [] when the task
+  // wrote nothing or the outcome carries no result (e.g. timeout).
+  generatedFiles: GeneratedFile[]
 }
 
 // StreamingOutcome adds the id of the streamed assistant bubble, when one was
@@ -184,6 +189,7 @@ function waitForTaskOutcome(
             completionTokens: Number(res?.completion_tokens ?? 0),
             cachedTokens: Number(res?.cached_tokens ?? 0),
             timedOut: false,
+            generatedFiles: mapGeneratedFiles(res?.generated_files),
           })
         })
         .catch((err: unknown) => {
@@ -233,6 +239,7 @@ function waitForTaskOutcome(
         completionTokens: 0,
         cachedTokens: 0,
         timedOut: true,
+        generatedFiles: [],
       })
     }, TASK_WAIT_TIMEOUT_MS)
   })
@@ -396,6 +403,7 @@ export function ChatPanel() {
             role,
             content,
             agent: agent || undefined,
+            ...(role === 'assistant' ? { generatedFiles: mapGeneratedFiles((turn as any)?.generated_files) } : {}),
           })
         }
       } catch (err) {
@@ -528,6 +536,7 @@ export function ChatPanel() {
               role,
               content,
               agent: agent || undefined,
+              ...(role === 'assistant' ? { generatedFiles: mapGeneratedFiles((turn as any)?.generated_files) } : {}),
             })
           }
           addSystem('已刷新对话历史（见上方）')
@@ -678,8 +687,17 @@ export function ChatPanel() {
       const taskID = await SubmitTask(prompt, sessionID, pendingImages, agentID)
       setRunTask(sessionID, taskID)
 
-      const { status, result, totalTokens, promptTokens, completionTokens, cachedTokens, timedOut, streamedId } =
-        await waitForTaskOutcome(taskID, sessionID, agentID, (tokens) => updateRun(sessionID, tokens))
+      const {
+        status,
+        result,
+        totalTokens,
+        promptTokens,
+        completionTokens,
+        cachedTokens,
+        timedOut,
+        streamedId,
+        generatedFiles,
+      } = await waitForTaskOutcome(taskID, sessionID, agentID, (tokens) => updateRun(sessionID, tokens))
       if (!timedOut) {
         updateRun(sessionID, totalTokens)
       }
@@ -723,13 +741,20 @@ export function ChatPanel() {
             streaming: false,
             agent: agentID,
             ...(status === 'cancelled' ? { content: `${priorContent}\n\n（已中断）` } : {}),
-            ...(timedOut ? {} : { meta }),
+            ...(timedOut ? {} : { meta, generatedFiles }),
           })
           if (timedOut) {
             // The finalized bubble alone cannot convey "still running"; surface
             // the same notice the non-streaming path shows rather than dropping
             // the truth. Distinct id so it does not collide with the bubble.
-            addMessage({ id: `assistant-timeout-${taskID}`, role: 'assistant', content, agent: agentID, meta })
+            addMessage({
+              id: `assistant-timeout-${taskID}`,
+              role: 'assistant',
+              content,
+              agent: agentID,
+              meta,
+              generatedFiles,
+            })
           }
         } else {
           // No streamed bubble survives: a non-streaming provider (no token ever
@@ -741,6 +766,7 @@ export function ChatPanel() {
             content,
             agent: agentID,
             meta,
+            generatedFiles,
           })
         }
       }
