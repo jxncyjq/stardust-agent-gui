@@ -15,10 +15,11 @@ import (
 )
 
 type App struct {
-	ctx     context.Context
-	serve   *ServeManager
-	cfgPath string
-	client  *http.Client
+	ctx           context.Context
+	serve         *ServeManager
+	cfgPath       string
+	client        *http.Client
+	browserStream *BrowserStreamManager // per-session screencast SSE forwarder; nil until serve starts
 }
 
 func NewApp(cfgPath string) *App {
@@ -71,10 +72,10 @@ func (a *App) startup(ctx context.Context) {
 		// body under WebView2) and forwarded to React as Wails events. The
 		// manager starts/stops a per-session consumer off the browser session
 		// lifecycle events the SSE bridge already sees.
-		browserStream := NewBrowserStreamManager(a.BaseURL, a.serve.Token, func(event string, data any) {
+		a.browserStream = NewBrowserStreamManager(a.BaseURL, a.serve.Token, func(event string, data any) {
 			runtime.EventsEmit(ctx, event, data)
 		})
-		StartSSEBridge(ctx, ctx, a.BaseURL, a.serve.Token, browserStream)
+		StartSSEBridge(ctx, ctx, a.BaseURL, a.serve.Token, a.browserStream)
 	}
 	a.writeStartupLog(err)
 }
@@ -608,6 +609,21 @@ func (a *App) BrowserSetViewport(sessionID string, width int, height int) error 
 		return fmt.Errorf("viewport width/height must be positive, got %dx%d", width, height)
 	}
 	return a.browserPost("/v1/browser/sessions/"+sessionID+"/viewport", map[string]any{"width": width, "height": height})
+}
+
+// EnsureBrowserStreamStatus asks the Go-side stream bridge to re-announce the
+// session's current connection state on the browser:stream Wails channel. The
+// React browser view calls it on (re)mount because the bridge emits
+// connected=true only once at connect; without this re-sync a remount after that
+// one-shot event leaves the view's connection badge stuck amber even though the
+// stream is live and frames keep arriving. No-op when the bridge is absent
+// (serve failed to start) — the badge then honestly stays disconnected.
+func (a *App) EnsureBrowserStreamStatus(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || a.browserStream == nil {
+		return
+	}
+	a.browserStream.ReemitStatus(sessionID)
 }
 
 // browserPost POSTs a JSON body to the local serve with the loopback bearer

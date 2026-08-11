@@ -111,6 +111,54 @@ func TestConsumeBrowserStreamHandlesLargeFrame(t *testing.T) {
 	}
 }
 
+// TestBrowserStreamManagerReemitStatus verifies the manager records the last
+// connection state per session and ReemitStatus re-announces it. This is the
+// fix for the amber-badge bug: the bridge emits connected=true only once at
+// connect, so a React remount that reset connected to false could never recover
+// it while the long-lived SSE stayed open. ReemitStatus lets a re-subscribing
+// view learn the current truth instead of relying on the missed one-shot event.
+func TestBrowserStreamManagerReemitStatus(t *testing.T) {
+	var events []map[string]any
+	emit := func(event string, data any) {
+		if event == "browser:stream" {
+			events = append(events, data.(map[string]any))
+		}
+	}
+	m := NewBrowserStreamManager(func() string { return "" }, func() string { return "" }, emit)
+
+	// Unknown session: re-emit reports not-connected (no guess, not connected).
+	m.ReemitStatus("sess-1")
+	// The run loop records a live connection via setConnectedState.
+	m.setConnectedState("sess-1", true)
+	m.ReemitStatus("sess-1")
+	// A recorded disconnect flips it back.
+	m.setConnectedState("sess-1", false)
+	m.ReemitStatus("sess-1")
+
+	got := make([]bool, 0, len(events))
+	for _, e := range events {
+		if e["session_id"] != "sess-1" {
+			t.Fatalf("session_id = %v, want sess-1", e["session_id"])
+		}
+		got = append(got, e["connected"].(bool))
+	}
+	want := []bool{false, true, false}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("re-emitted connected sequence = %v, want %v", got, want)
+	}
+}
+
+// TestBrowserStreamManagerReemitStatusEmptyNoop verifies a blank session id does
+// not emit (nothing to re-announce).
+func TestBrowserStreamManagerReemitStatusEmptyNoop(t *testing.T) {
+	emitted := false
+	m := NewBrowserStreamManager(func() string { return "" }, func() string { return "" }, func(string, any) { emitted = true })
+	m.ReemitStatus("")
+	if emitted {
+		t.Fatalf("ReemitStatus(\"\") emitted, want no-op")
+	}
+}
+
 // TestBrowserStreamManagerStartStopIdempotent verifies Start is idempotent per
 // session and Stop cancels the consumer.
 func TestBrowserStreamManagerStartStopIdempotent(t *testing.T) {

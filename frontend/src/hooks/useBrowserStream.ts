@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { EnsureBrowserStreamStatus } from '../../wailsjs/go/main/App'
 import { useBrowserStore, type BrowserElement } from '../stores/browserStore'
 
 // useBrowserStream feeds the browser view for the given sessionId from the
@@ -58,6 +59,15 @@ export function useBrowserStream(sessionId: string | null) {
     EventsOn('browser:observation', onObservation)
     EventsOn('browser:progress', onProgress)
     EventsOn('browser:stream', onStream)
+
+    // The bridge emits connected=true only once, at SSE connect. On a remount
+    // after that (the browser view is conditionally mounted), our listener above
+    // is fresh and missed it, so `connected` would sit false and show an amber
+    // badge even while frames keep arriving. Now that the listener is registered,
+    // ask the bridge to re-announce the session's current connection state.
+    EnsureBrowserStreamStatus(sessionId).catch((err) =>
+      console.error('browser stream status sync failed', err),
+    )
     return () => {
       EventsOff('browser:frame')
       EventsOff('browser:observation')

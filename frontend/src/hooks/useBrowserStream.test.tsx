@@ -15,10 +15,34 @@ vi.mock('../../wailsjs/runtime/runtime', () => ({
   },
 }))
 
+// EnsureBrowserStreamStatus is the Go binding the hook calls on mount to have the
+// bridge re-announce the current connection state (fix for the stuck amber badge
+// after a remount). Mock it so the hook does not reach into window.go.
+const ensureStatus = vi.fn()
+vi.mock('../../wailsjs/go/main/App', () => ({
+  EnsureBrowserStreamStatus: (id: string) => {
+    ensureStatus(id)
+    return Promise.resolve()
+  },
+}))
+
 import { useBrowserStream } from './useBrowserStream'
 
 describe('useBrowserStream', () => {
-  beforeEach(() => useBrowserStore.getState().reset())
+  beforeEach(() => {
+    useBrowserStore.getState().reset()
+    ensureStatus.mockClear()
+  })
+
+  it('re-syncs connection status on mount', () => {
+    renderHook(() => useBrowserStream('sess-1'))
+    expect(ensureStatus).toHaveBeenCalledWith('sess-1')
+  })
+
+  it('does not re-sync status when sessionId is null', () => {
+    renderHook(() => useBrowserStream(null))
+    expect(ensureStatus).not.toHaveBeenCalled()
+  })
 
   it('writes frame/observation/progress/connected for the matching session', () => {
     renderHook(() => useBrowserStream('sess-1'))
