@@ -42,6 +42,12 @@ type BrowserStreamManager struct {
 
 	mu     sync.Mutex
 	active map[string]context.CancelFunc // sessionID -> cancel for its run goroutine
+	// connected records the last connection state emitted for each session so a
+	// re-subscribing view can be told the current truth via ReemitStatus. The
+	// bridge emits connected=true only once per SSE connection; without this a
+	// React remount that reset its local flag to false could never recover it
+	// while the long-lived stream stayed open (the amber-badge bug).
+	connected map[string]bool
 }
 
 // NewBrowserStreamManager builds a manager. baseURLFn/tokenFn are read on every
@@ -54,6 +60,48 @@ func NewBrowserStreamManager(baseURLFn, tokenFn func() string, emit func(event s
 		tokenFn:   tokenFn,
 		emit:      emit,
 		active:    make(map[string]context.CancelFunc),
+		connected: make(map[string]bool),
+	}
+}
+
+// setConnectedState records (without emitting) the last connection state for a
+// session. Called from the recording emit wrapper so ReemitStatus can later
+// report the current truth to a re-subscribing view.
+func (m *BrowserStreamManager) setConnectedState(sessionID string, c bool) {
+	m.mu.Lock()
+	m.connected[sessionID] = c
+	m.mu.Unlock()
+}
+
+// ReemitStatus re-announces a session's current connection state on the
+// browser:stream channel. A view that (re)subscribes calls this so it learns the
+// live state instead of waiting for the next connect/disconnect edge, which for
+// a healthy long-lived stream never comes. A blank id or unknown session reports
+// not-connected (absent = false); that is the honest state, not a guess.
+func (m *BrowserStreamManager) ReemitStatus(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	m.mu.Lock()
+	c := m.connected[sessionID]
+	m.mu.Unlock()
+	m.emit("browser:stream", map[string]any{"session_id": sessionID, "connected": c})
+}
+
+// recordingEmit wraps m.emit so every browser:stream connected edge that flows
+// through it also updates the recorded per-session state. run passes this to
+// consumeBrowserStream (whose one-shot connected=true event thus gets recorded)
+// and uses it for its own disconnected marker.
+func (m *BrowserStreamManager) recordingEmit(sessionID string) func(string, any) {
+	return func(event string, data any) {
+		if event == "browser:stream" {
+			if mp, ok := data.(map[string]any); ok {
+				if c, ok := mp["connected"].(bool); ok {
+					m.setConnectedState(sessionID, c)
+				}
+			}
+		}
+		m.emit(event, data)
 	}
 }
 
@@ -79,9 +127,14 @@ func (m *BrowserStreamManager) Stop(sessionID string) {
 	m.mu.Lock()
 	cancel, ok := m.active[sessionID]
 	delete(m.active, sessionID)
+	delete(m.connected, sessionID)
 	m.mu.Unlock()
 	if ok {
 		cancel()
+		// A closed session is disconnected: announce it so a view still showing
+		// this session flips its badge to amber rather than keeping a stale green
+		// (the run loop returns on ctx cancel without emitting a disconnect edge).
+		m.emit("browser:stream", map[string]any{"session_id": sessionID, "connected": false})
 	}
 }
 
@@ -90,12 +143,15 @@ func (m *BrowserStreamManager) Stop(sessionID string) {
 // a disconnected marker and retries after a delay until the session is stopped
 // or the app context is cancelled.
 func (m *BrowserStreamManager) run(ctx context.Context, sessionID string) {
+	// recordingEmit records every connected edge (including consumeBrowserStream's
+	// one-shot connected=true) so ReemitStatus can later report the live state.
+	emit := m.recordingEmit(sessionID)
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 		url := fmt.Sprintf("%s/v1/browser/sessions/%s/stream", m.baseURLFn(), sessionID)
-		err := consumeBrowserStream(ctx, url, m.tokenFn(), sessionID, m.emit)
+		err := consumeBrowserStream(ctx, url, m.tokenFn(), sessionID, emit)
 		if ctx.Err() != nil {
 			return
 		}
@@ -103,7 +159,7 @@ func (m *BrowserStreamManager) run(ctx context.Context, sessionID string) {
 		// source, so a stream that never recovers must be diagnosable rather
 		// than look like a canvas that simply stays blank.
 		fmt.Fprintf(os.Stderr, "browser stream bridge: %v; retrying %s in %s\n", err, url, browserStreamRetryDelay)
-		m.emit("browser:stream", map[string]any{"session_id": sessionID, "connected": false})
+		emit("browser:stream", map[string]any{"session_id": sessionID, "connected": false})
 		select {
 		case <-ctx.Done():
 			return

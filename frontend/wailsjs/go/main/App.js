@@ -18,6 +18,10 @@ export function BrowserTakeover(arg1, arg2) {
   return window['go']['main']['App']['BrowserTakeover'](arg1, arg2);
 }
 
+export function EnsureBrowserStreamStatus(arg1) {
+  return window['go']['main']['App']['EnsureBrowserStreamStatus'](arg1);
+}
+
 export function DecideApproval(arg1, arg2, arg3) {
   return window['go']['main']['App']['DecideApproval'](arg1, arg2, arg3);
 }
