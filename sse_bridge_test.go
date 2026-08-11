@@ -169,7 +169,7 @@ func TestConsumeSSESendsBearerToken(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_ = consumeSSEWithToken(context.Background(), srv.URL, "tok-123", func(string, any) {})
+	_ = consumeSSEWithToken(context.Background(), srv.URL, "tok-123", func(string, any) {}, nil)
 	if gotAuth != "Bearer tok-123" {
 		t.Fatalf("Authorization = %q, want Bearer tok-123", gotAuth)
 	}
@@ -188,7 +188,7 @@ func TestConsumeSSEOmitsAuthWhenTokenEmpty(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_ = consumeSSEWithToken(context.Background(), srv.URL, "", func(string, any) {})
+	_ = consumeSSEWithToken(context.Background(), srv.URL, "", func(string, any) {}, nil)
 	if authPresent {
 		t.Fatal("Authorization header present, want absent when token is empty")
 	}
@@ -228,7 +228,7 @@ func TestConsumeSSEForwardsBrowserSession(t *testing.T) {
 
 	var got []emittedEvent
 	emit := func(event string, data any) { got = append(got, emittedEvent{event: event, data: data}) }
-	_ = consumeSSEWithToken(context.Background(), srv.URL, "", emit)
+	_ = consumeSSEWithToken(context.Background(), srv.URL, "", emit, nil)
 
 	var found bool
 	for _, e := range got {

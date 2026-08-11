@@ -1,8 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
-import { GetBrowserEndpoint } from '../../wailsjs/go/main/App'
 import { useBrowserStore } from '../stores/browserStore'
 import { useBrowserStream } from '../hooks/useBrowserStream'
-import { mapToNormalized, Throttler, postInput, postTakeover, type InputEvent } from '../lib/browserInput'
+import { mapToNormalizedContained, Throttler, postInput, postTakeover, type InputEvent } from '../lib/browserInput'
 
 // BrowserView：只读展示 Agent 浏览过程；接管开时 canvas 捕获鼠标/键盘注入 Agent 会话。
 export function BrowserView() {
@@ -36,12 +35,11 @@ export function BrowserView() {
     return () => { cancelled = true }
   }, [frameDataUri])
 
-  // send 把一批事件经 GetBrowserEndpoint 的 token POST 到后端；失败响亮报（不静默）。
+  // send 把一批事件经 Go binding POST 到后端（避 webview CORS 预检）；失败响亮报（不静默）。
   const send = useCallback(async (events: InputEvent[]) => {
     if (!sessionId) return
     try {
-      const ep = await GetBrowserEndpoint()
-      await postInput(ep.baseURL, ep.token, sessionId, events)
+      await postInput(sessionId, events)
     } catch (err) {
       console.error('browser takeover: inject failed', err)
     }
@@ -51,8 +49,7 @@ export function BrowserView() {
     if (!sessionId) return
     const next = !takeover
     try {
-      const ep = await GetBrowserEndpoint()
-      await postTakeover(ep.baseURL, ep.token, sessionId, next)
+      await postTakeover(sessionId, next)
       setTakeover(next)
     } catch (err) {
       console.error('browser takeover: toggle failed', err)
@@ -60,8 +57,17 @@ export function BrowserView() {
   }, [sessionId, takeover, setTakeover])
 
   const norm = (e: { clientX: number; clientY: number }) => {
-    const rect = canvasRef.current!.getBoundingClientRect()
-    return mapToNormalized(rect, e.clientX, e.clientY)
+    const canvas = canvasRef.current!
+    // Map against the letterboxed image rect (object-contain), not the raw box,
+    // so clicks land on the real page pixel. canvas.width/height is the frame's
+    // native size; the CSS box is w-full/h-full and usually a different aspect.
+    return mapToNormalizedContained(
+      canvas.getBoundingClientRect(),
+      canvas.width,
+      canvas.height,
+      e.clientX,
+      e.clientY,
+    )
   }
 
   const onMouseMove = (e: React.MouseEvent) => {
