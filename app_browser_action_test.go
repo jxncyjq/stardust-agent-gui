@@ -64,6 +64,38 @@ func TestBrowserInputForwardsEventsVerbatim(t *testing.T) {
 	}
 }
 
+// TestBrowserSetViewportPostsSize verifies the viewport sync posts width/height
+// through Go to the session's viewport endpoint.
+func TestBrowserSetViewportPostsSize(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	a := newFakeBackendApp(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.WriteHeader(http.StatusOK)
+	})
+	if err := a.BrowserSetViewport("sess-3", 620, 800); err != nil {
+		t.Fatalf("BrowserSetViewport: %v", err)
+	}
+	if gotPath != "/v1/browser/sessions/sess-3/viewport" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if gotBody["width"] != float64(620) || gotBody["height"] != float64(800) {
+		t.Errorf("body = %v, want width 620 height 800", gotBody)
+	}
+}
+
+func TestBrowserSetViewportValidates(t *testing.T) {
+	a := NewApp("")
+	if err := a.BrowserSetViewport("", 620, 800); err == nil {
+		t.Error("empty session = nil, want error")
+	}
+	if err := a.BrowserSetViewport("sess-3", 0, 800); err == nil {
+		t.Error("zero width = nil, want error")
+	}
+}
+
 // TestBrowserActionsValidateInput guards the fail-loud argument checks.
 func TestBrowserActionsValidateInput(t *testing.T) {
 	a := NewApp("") // no backend: validation short-circuits before any HTTP call
