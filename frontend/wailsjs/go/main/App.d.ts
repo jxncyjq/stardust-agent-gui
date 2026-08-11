@@ -6,6 +6,8 @@ export function BaseURL():Promise<string>;
 
 export function BrowserInput(arg1:string,arg2:string):Promise<void>;
 
+export function BrowserSetViewport(arg1:string,arg2:number,arg3:number):Promise<void>;
+
 export function BrowserTakeover(arg1:string,arg2:boolean):Promise<void>;
 
 export function DecideApproval(arg1:string,arg2:string,arg3:string):Promise<void>;

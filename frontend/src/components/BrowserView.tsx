@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useBrowserStore } from '../stores/browserStore'
 import { useBrowserStream } from '../hooks/useBrowserStream'
 import { mapToNormalizedContained, Throttler, postInput, postTakeover, type InputEvent } from '../lib/browserInput'
+import { BrowserSetViewport } from '../../wailsjs/go/main/App'
 
 // BrowserView：只读展示 Agent 浏览过程；接管开时 canvas 捕获鼠标/键盘注入 Agent 会话。
 export function BrowserView() {
@@ -13,9 +14,41 @@ export function BrowserView() {
   const takeover = useBrowserStore((s) => s.takeover)
   const setTakeover = useBrowserStore((s) => s.setTakeover)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const moveThrottle = useRef(new Throttler(25)) // ~40fps 合并 mousemove
 
   useBrowserStream(sessionId)
+
+  // 视口同步：把面板像素尺寸推给后端，后端据此设浏览器视口，使帧宽高比与面板一致、
+  // 填满无 letterbox。挂载即同步一次，之后按 ResizeObserver 防抖（200ms）跟随面板缩放。
+  useEffect(() => {
+    if (!sessionId) return
+    const el = containerRef.current
+    if (!el) return
+    let timer: number | undefined
+    const push = () => {
+      const w = Math.round(el.clientWidth)
+      const h = Math.round(el.clientHeight)
+      if (w <= 0 || h <= 0) return // 面板尚未布局，跳过（下次 resize 会补）
+      BrowserSetViewport(sessionId, w, h).catch((err) =>
+        console.error('browser viewport sync failed', err),
+      )
+    }
+    const schedule = () => {
+      if (timer) clearTimeout(timer)
+      timer = window.setTimeout(push, 200)
+    }
+    push() // 初次同步
+    let ro: ResizeObserver | undefined
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(schedule)
+      ro.observe(el)
+    }
+    return () => {
+      if (timer) clearTimeout(timer)
+      ro?.disconnect()
+    }
+  }, [sessionId])
 
   useEffect(() => {
     if (!frameDataUri || !canvasRef.current) return
@@ -135,7 +168,7 @@ export function BrowserView() {
           接管中 · 你的鼠标/键盘正操作 Agent 的浏览器会话
         </div>
       )}
-      <div className="flex-1 overflow-hidden rounded border border-border bg-muted">
+      <div ref={containerRef} className="flex-1 overflow-hidden rounded border border-border bg-muted">
         <canvas
           ref={canvasRef}
           tabIndex={takeover ? 0 : -1}

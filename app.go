@@ -594,6 +594,22 @@ func (a *App) BrowserInput(sessionID string, eventsJSON string) error {
 	return a.browserPost("/v1/browser/sessions/"+sessionID+"/input", map[string]any{"events": json.RawMessage(eventsJSON)})
 }
 
+// BrowserSetViewport sets the session's browser viewport to width×height CSS px
+// so the screencast frames match the GUI panel's aspect and fill it without
+// letterboxing. Routed through Go for the same CORS-avoidance reason as
+// BrowserTakeover. Called (debounced) by the React browser view on mount and
+// resize.
+func (a *App) BrowserSetViewport(sessionID string, width int, height int) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("viewport width/height must be positive, got %dx%d", width, height)
+	}
+	return a.browserPost("/v1/browser/sessions/"+sessionID+"/viewport", map[string]any{"width": width, "height": height})
+}
+
 // browserPost POSTs a JSON body to the local serve with the loopback bearer
 // token (mirroring apiGet's auth), returning an error for transport failures or
 // any non-2xx status so the caller (and the React button handler) can surface a

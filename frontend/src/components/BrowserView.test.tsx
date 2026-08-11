@@ -6,9 +6,11 @@ import { useBrowserStore } from '../stores/browserStore'
 // takeover/input 现经 Go binding（非 webview fetch），mock binding 模块与 stream hook。
 const browserTakeoverMock = vi.fn()
 const browserInputMock = vi.fn()
+const browserSetViewportMock = vi.fn().mockResolvedValue(undefined)
 vi.mock('../../wailsjs/go/main/App', () => ({
   BrowserTakeover: (id: string, enabled: boolean) => browserTakeoverMock(id, enabled),
   BrowserInput: (id: string, events: string) => browserInputMock(id, events),
+  BrowserSetViewport: (id: string, w: number, h: number) => browserSetViewportMock(id, w, h),
 }))
 vi.mock('../hooks/useBrowserStream', () => ({ useBrowserStream: () => {} }))
 
@@ -20,6 +22,7 @@ describe('BrowserView', () => {
     // 这里给 binding mock 重设一次默认 resolve。
     browserTakeoverMock.mockReset().mockResolvedValue(undefined)
     browserInputMock.mockReset().mockResolvedValue(undefined)
+    browserSetViewportMock.mockReset().mockResolvedValue(undefined)
   })
 
   it('shows empty state when no session', () => {
