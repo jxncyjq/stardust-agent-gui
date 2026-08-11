@@ -68,15 +68,22 @@ export function BrowserView() {
     return () => { cancelled = true }
   }, [frameDataUri])
 
-  // send 把一批事件经 Go binding POST 到后端（避 webview CORS 预检）；失败响亮报（不静默）。
-  const send = useCallback(async (events: InputEvent[]) => {
-    if (!sessionId) return
-    try {
-      await postInput(sessionId, events)
-    } catch (err) {
-      console.error('browser takeover: inject failed', err)
-    }
-  }, [sessionId])
+  // send 把一批事件经 Go binding POST 到后端（避 webview CORS 预检）。
+  // 输入事件在后端顺序改写共享且有状态的 page.Mouse，而一次 click 依赖 mousedown→mouseup
+  // 按序到达。此前每个事件是独立的 fire-and-forget POST（void send），并发到达后被打乱，
+  // 令后端合成不出 click——接管页面点不动。这里把发送串成一条 ref promise 链，使每个事件
+  // 严格排在上一个之后注入（有序、不重叠）；单个 POST 失败被隔离，不阻断后续手势，并响亮记日志。
+  const sendChain = useRef<Promise<unknown>>(Promise.resolve())
+  const send = useCallback(
+    (events: InputEvent[]) => {
+      if (!sessionId) return
+      sendChain.current = sendChain.current
+        .catch(() => {}) // 隔离上一次失败，链不中断
+        .then(() => postInput(sessionId, events))
+        .catch((err) => console.error('browser takeover: inject failed', err))
+    },
+    [sessionId],
+  )
 
   const toggleTakeover = useCallback(async () => {
     if (!sessionId) return
@@ -119,11 +126,8 @@ export function BrowserView() {
     const { x, y } = norm(e)
     void send([{ type: 'mouseup', x, y, button: mouseButtonName(e.button) }])
   }
-  const onClick = (e: React.MouseEvent) => {
-    if (!takeover) return
-    const { x, y } = norm(e)
-    void send([{ type: 'click', x, y, button: mouseButtonName(e.button) }])
-  }
+  // 不再单独发 DOM click：mousedown + mouseup 已让后端 page.Mouse 合成一次 click。
+  // 再发一个 click（injectOne 又做一次 Down+Up）等于双击，并在并发/状态上添乱。
   const onWheel = (e: React.WheelEvent) => {
     if (!takeover) return
     const { x, y } = norm(e)
@@ -177,7 +181,6 @@ export function BrowserView() {
           onMouseMove={onMouseMove}
           onMouseDown={onMouseDown}
           onMouseUp={onMouseUp}
-          onClick={onClick}
           onWheel={onWheel}
           onKeyDown={onKeyDown}
           onKeyUp={onKeyUp}

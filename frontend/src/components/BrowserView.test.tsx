@@ -61,6 +61,26 @@ describe('BrowserView', () => {
       await waitFor(() => expect(screen.getByText(/接管中/)).toBeInTheDocument())
     })
 
+    it('injects mousedown+mouseup on a click, without a redundant click event', async () => {
+      render(<BrowserView />)
+      fireEvent.click(screen.getByRole('button', { name: /接管/ }))
+      await waitFor(() => expect(screen.getByText(/接管中/)).toBeInTheDocument())
+
+      const canvas = document.querySelector('canvas') as HTMLCanvasElement
+      fireEvent.mouseDown(canvas, { clientX: 10, clientY: 10 })
+      fireEvent.mouseUp(canvas, { clientX: 10, clientY: 10 })
+      fireEvent.click(canvas, { clientX: 10, clientY: 10 })
+
+      // Sends are chained (async), so let the queue flush before asserting.
+      await waitFor(() => expect(browserInputMock).toHaveBeenCalled())
+      await waitFor(() => {
+        const types = browserInputMock.mock.calls.map((c) => JSON.parse(c[1] as string)[0].type)
+        expect(types).toContain('mousedown')
+        expect(types).toContain('mouseup')
+        expect(types).not.toContain('click')
+      })
+    })
+
     it('does not enter takeover when the toggle binding fails', async () => {
       browserTakeoverMock.mockRejectedValue(new Error('post takeover: status 500'))
       render(<BrowserView />)
