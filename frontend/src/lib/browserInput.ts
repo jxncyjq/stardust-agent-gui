@@ -27,6 +27,34 @@ export function mapToNormalized(
   }
 }
 
+// mapToNormalizedContained maps a client point to 0..1 over the image actually
+// displayed inside an object-contain canvas box. The canvas bitmap is the frame
+// (imgW×imgH); CSS object-contain scales it by the smaller ratio and centers
+// it, so the rendered image is letterboxed with gray margins. Mapping against
+// the raw box rect (as mapToNormalized alone would) skews every takeover click
+// by those margins, landing injected clicks on the wrong page pixel. This
+// reconstructs the displayed image rect (scale + centering offsets) so the
+// point maps to the real page coordinate. imgW/imgH ≤ 0 fall back to the box.
+export function mapToNormalizedContained(
+  box: { left: number; top: number; width: number; height: number },
+  imgW: number,
+  imgH: number,
+  clientX: number,
+  clientY: number,
+): { x: number; y: number } {
+  if (imgW <= 0 || imgH <= 0) return mapToNormalized(box, clientX, clientY)
+  const scale = Math.min(box.width / imgW, box.height / imgH)
+  const dispW = imgW * scale
+  const dispH = imgH * scale
+  const offX = (box.width - dispW) / 2
+  const offY = (box.height - dispH) / 2
+  return mapToNormalized(
+    { left: box.left + offX, top: box.top + offY, width: dispW, height: dispH },
+    clientX,
+    clientY,
+  )
+}
+
 // Throttler 按最小间隔放行（用于合并高频 mousemove）。调用方传入单调 now(ms)。
 export class Throttler {
   private last = -Infinity

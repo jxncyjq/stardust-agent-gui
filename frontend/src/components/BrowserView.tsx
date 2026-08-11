@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useBrowserStore } from '../stores/browserStore'
 import { useBrowserStream } from '../hooks/useBrowserStream'
-import { mapToNormalized, Throttler, postInput, postTakeover, type InputEvent } from '../lib/browserInput'
+import { mapToNormalizedContained, Throttler, postInput, postTakeover, type InputEvent } from '../lib/browserInput'
 
 // BrowserView：只读展示 Agent 浏览过程；接管开时 canvas 捕获鼠标/键盘注入 Agent 会话。
 export function BrowserView() {
@@ -57,8 +57,17 @@ export function BrowserView() {
   }, [sessionId, takeover, setTakeover])
 
   const norm = (e: { clientX: number; clientY: number }) => {
-    const rect = canvasRef.current!.getBoundingClientRect()
-    return mapToNormalized(rect, e.clientX, e.clientY)
+    const canvas = canvasRef.current!
+    // Map against the letterboxed image rect (object-contain), not the raw box,
+    // so clicks land on the real page pixel. canvas.width/height is the frame's
+    // native size; the CSS box is w-full/h-full and usually a different aspect.
+    return mapToNormalizedContained(
+      canvas.getBoundingClientRect(),
+      canvas.width,
+      canvas.height,
+      e.clientX,
+      e.clientY,
+    )
   }
 
   const onMouseMove = (e: React.MouseEvent) => {
