@@ -39,4 +39,18 @@ describe('browserStore takeover', () => {
     useBrowserStore.getState().setSession(null)
     expect(useBrowserStore.getState().takeover).toBe(false)
   })
+  it('preserves takeover when setSession repeats the same id', () => {
+    // Backend reuses one browser session per chat session and re-emits
+    // session_opened(same id) each message; that must not drop takeover.
+    useBrowserStore.getState().setSession('sess-1')
+    useBrowserStore.getState().setTakeover(true)
+    useBrowserStore.getState().setSession('sess-1')
+    expect(useBrowserStore.getState().takeover).toBe(true)
+  })
+  it('resets takeover when the session id actually changes', () => {
+    useBrowserStore.getState().setSession('sess-1')
+    useBrowserStore.getState().setTakeover(true)
+    useBrowserStore.getState().setSession('sess-2')
+    expect(useBrowserStore.getState().takeover).toBe(false)
+  })
 })
