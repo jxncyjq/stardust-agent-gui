@@ -10,13 +10,13 @@ export function BrowserSetViewport(arg1:string,arg2:number,arg3:number):Promise<
 
 export function BrowserTakeover(arg1:string,arg2:boolean):Promise<void>;
 
-export function EnsureBrowserStreamStatus(arg1:string):Promise<void>;
-
 export function DecideApproval(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DeleteProject(arg1:string):Promise<void>;
 
 export function DeleteSession(arg1:string):Promise<void>;
+
+export function EnsureBrowserStreamStatus(arg1:string):Promise<void>;
 
 export function FetchPreviewFile(arg1:string,arg2:string):Promise<main.WorkspaceFile>;
 
