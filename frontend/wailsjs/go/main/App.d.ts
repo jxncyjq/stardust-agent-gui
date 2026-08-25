@@ -16,6 +16,8 @@ export function DeleteProject(arg1:string):Promise<void>;
 
 export function DeleteSession(arg1:string):Promise<void>;
 
+export function DenyPlugin(arg1:string):Promise<main.ConsentResultDTO>;
+
 export function EnsureBrowserStreamStatus(arg1:string):Promise<void>;
 
 export function FetchPreviewFile(arg1:string,arg2:string):Promise<main.WorkspaceFile>;
@@ -34,6 +36,8 @@ export function GetSessionTurns(arg1:string):Promise<Array<Record<string, any>>>
 
 export function GetTaskResult(arg1:string):Promise<Record<string, any>>;
 
+export function GrantPlugin(arg1:string,arg2:Array<string>,arg3:Array<string>,arg4:Array<string>):Promise<main.ConsentResultDTO>;
+
 export function HandoffTask(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function InterruptTask(arg1:string):Promise<void>;
@@ -47,6 +51,8 @@ export function ListGateableTools():Promise<Array<main.GateableToolDTO>>;
 export function ListInbox():Promise<Array<Record<string, any>>>;
 
 export function ListPendingApprovals():Promise<Array<Record<string, any>>>;
+
+export function ListPlugins():Promise<Array<main.PluginDTO>>;
 
 export function ListRuntimeEvents():Promise<Array<Record<string, any>>>;
 
