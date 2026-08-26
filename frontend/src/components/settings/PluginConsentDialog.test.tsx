@@ -267,6 +267,21 @@ describe('PluginConsentDialog — declared_unresolved is not "requests nothing"'
   })
 })
 
+describe('PluginConsentDialog — declared_error makes the unresolved refusal legible', () => {
+  it('shows the declared_error reason instead of the generic cache-miss wording, and keeps grant blocked', () => {
+    const plugin = makePlugin({
+      declared_capabilities: [],
+      declared_unresolved: true,
+      declared_error: 'plugin.json: unexpected end of JSON input',
+    })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    expect(screen.getByText(/plugin.json: unexpected end of JSON input/)).toBeInTheDocument()
+    // The blocking rule is unchanged — only the explanation differs.
+    expect(screen.getByRole('button', { name: '确认并授权' })).toBeDisabled()
+  })
+})
+
 describe('PluginConsentDialog — deny mode', () => {
   it('has no capability/host/path checkboxes and confirms via DenyPlugin', async () => {
     mocks.DenyPlugin.mockResolvedValue(

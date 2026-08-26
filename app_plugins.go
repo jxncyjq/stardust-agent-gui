@@ -22,6 +22,14 @@ import (
 // false ("this plugin declares nothing") and when true ("the server could
 // not determine what this plugin declares"), and those two states must not
 // collapse into the same absent-field JSON.
+//
+// DeclaredError carries the reason when DeclaredUnresolved is true because
+// the declaration failed to load (a corrupted plugin.wasm, a package
+// directory removed from disk, …) — it is empty when DeclaredUnresolved is
+// true for the other reason (an uncached remote package, an expected
+// not-yet-fetched state, not a failure). Mirrors legionAgent's
+// internal/server/plugins.go PluginView.DeclaredError field-for-field; see
+// its doc comment for the full case breakdown.
 type PluginDTO struct {
 	Name                 string   `json:"name"`
 	Version              string   `json:"version"`
@@ -32,6 +40,7 @@ type PluginDTO struct {
 	DeclaredAllowedHosts []string `json:"declared_allowed_hosts"`
 	DeclaredAllowedPaths []string `json:"declared_allowed_paths"`
 	DeclaredUnresolved   bool     `json:"declared_unresolved"`
+	DeclaredError        string   `json:"declared_error,omitempty"`
 	GrantedCapabilities  []string `json:"granted_capabilities"`
 	GrantedAllowedHosts  []string `json:"granted_allowed_hosts"`
 	GrantedAllowedPaths  []string `json:"granted_allowed_paths"`

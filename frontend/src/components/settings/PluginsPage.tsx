@@ -259,11 +259,26 @@ function PluginRow({
             // than being dropped just because this entry converged fine.
             <p className="text-xs text-amber-600 break-all">收敛警告：{override.result.convergence_detail}</p>
           )}
-          {plugin.declared_unresolved && (
-            // Distinct from "this plugin requests nothing" on purpose — see
-            // PluginConsentDialog's own doc comment for the same rule
-            // inside the grant dialog.
-            <p className="text-xs text-muted-foreground">该插件的能力声明尚未在本地解析（远程包尚未缓存）。</p>
+          {plugin.declared_error ? (
+            // declared_error means DeclaredUnresolved is true for the OTHER
+            // reason: the declaration failed to load (corrupted plugin.wasm,
+            // package dir removed from disk, …), not a not-yet-cached remote
+            // package. This is the row-level fix the server change exists
+            // for — this used to take the whole /v1/plugins call down as a
+            // 500, hiding every OTHER plugin's row along with it (and the
+            // deny button below, which stays reachable regardless of this
+            // branch). Rendered distinct from `detail` (the loader's state
+            // explanation) in destructive color because this is the reason
+            // the DECLARATION itself could not be read, a different failure
+            // than a load/activation failure.
+            <p className="text-xs text-destructive break-all">插件声明解析失败：{plugin.declared_error}</p>
+          ) : (
+            plugin.declared_unresolved && (
+              // Distinct from "this plugin requests nothing" on purpose —
+              // see PluginConsentDialog's own doc comment for the same rule
+              // inside the grant dialog.
+              <p className="text-xs text-muted-foreground">该插件的能力声明尚未在本地解析（远程包尚未缓存）。</p>
+            )
           )}
           {state === 'unauthorized' && (
             <>

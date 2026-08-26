@@ -85,6 +85,36 @@ describe('PluginsPage — declared_unresolved is not "requests nothing"', () => 
   })
 })
 
+describe('PluginsPage — declared_error surfaces which package broke without hiding the rest', () => {
+  it('renders the declared_error reason on the broken row and still offers its deny button, while the other row in the same payload renders normally', async () => {
+    mocks.ListPlugins.mockResolvedValue([
+      makePlugin({
+        name: 'broken-plugin',
+        state: 'failed',
+        detail: 'tool name conflict: fetch',
+        declared_unresolved: true,
+        declared_error: 'plugin.json: unexpected end of JSON input',
+      }),
+      makePlugin({ name: 'healthy-plugin', state: 'unauthorized' }),
+    ])
+    render(<PluginsPage />)
+
+    // The broken row shows the declared_error reason, distinct from the
+    // loader's own `detail` line, and its deny button ("撤销授权") is still
+    // reachable — the whole point of the server fix this wires up.
+    const brokenRow = await screen.findByRole('group', { name: '插件 broken-plugin' })
+    expect(within(brokenRow).getByText(/plugin.json: unexpected end of JSON input/)).toBeInTheDocument()
+    expect(within(brokenRow).getByText(/tool name conflict: fetch/)).toBeInTheDocument()
+    expect(within(brokenRow).getByRole('button', { name: '撤销授权' })).toBeInTheDocument()
+
+    // One broken package must not hide any other row in the same payload —
+    // this is the regression the 500 caused (zero rows rendered at all).
+    const healthyRow = await screen.findByRole('group', { name: '插件 healthy-plugin' })
+    expect(within(healthyRow).getByRole('button', { name: '授权' })).toBeInTheDocument()
+    expect(within(healthyRow).queryByText(/JSON input/)).not.toBeInTheDocument()
+  })
+})
+
 describe('PluginsPage — pending_convergence and the no-cancel rule', () => {
   it('renders "已授权，等待收敛" with convergence_detail and a retry affordance once a grant reports pending_convergence', async () => {
     mocks.ListPlugins.mockResolvedValue([makePlugin({ name: 'plugin-p', state: 'unauthorized' })])

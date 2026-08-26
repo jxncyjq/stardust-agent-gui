@@ -91,7 +91,16 @@ export function PluginConsentDialog({ plugin, mode, onClose, onResult }: PluginC
 
   let disabledReason = ''
   if (unresolvedBlocked) {
-    disabledReason = '该插件的能力声明尚未在本地解析（远程包尚未缓存），此处无法确认它请求的范围，暂时无法授权。'
+    // declared_error, when present, means declared_unresolved is true for
+    // the OTHER reason: the declaration failed to load (not a not-yet-
+    // cached remote package) — show that concrete reason instead of the
+    // generic cache-miss wording, which would misdescribe an actual
+    // failure as "not fetched yet". The blocking rule itself (grant stays
+    // disabled) is unchanged either way — this only makes the refusal
+    // legible.
+    disabledReason = plugin.declared_error
+      ? `该插件的能力声明解析失败，此处无法确认它请求的范围，暂时无法授权：${plugin.declared_error}`
+      : '该插件的能力声明尚未在本地解析（远程包尚未缓存），此处无法确认它请求的范围，暂时无法授权。'
   } else if (hostsBlocked) {
     disabledReason = '此插件声明了 http 能力和允许主机列表，取消全部主机会让 http 授权覆盖不到任何目标——服务器会拒绝，至少保留一个主机。'
   } else if (pathsBlocked) {
