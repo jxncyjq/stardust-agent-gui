@@ -16,14 +16,21 @@ export type RightView = 'status' | 'browser' | 'preview' | 'files'
 // toggled from the sidebar gear and consumed by App. editingAgent drives the
 // drill-in sub-agent page inside that modal; it lives here rather than in the
 // modal so the agents editor — rendered deep inside the form — can open a page
-// without threading a callback through every field renderer.
+// without threading a callback through every field renderer. pluginsOpen is
+// the same idea for the plugin consent panel (PluginsPage), which sits at the
+// same level as editingAgent — a top-level view inside the modal, not a field
+// inside the config draft — reachable from a tab in the modal's own header
+// rather than from a field renderer.
 interface UIState {
   settingsOpen: boolean
   editingAgent: EditingAgent | null
+  pluginsOpen: boolean
   openSettings: () => void
   closeSettings: () => void
   openAgent: (agent: EditingAgent) => void
   closeAgent: () => void
+  openPlugins: () => void
+  closePlugins: () => void
   rightView: RightView
   setRightView: (v: RightView) => void
 }
@@ -31,12 +38,16 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
   settingsOpen: false,
   editingAgent: null,
+  pluginsOpen: false,
   openSettings: () => set({ settingsOpen: true }),
-  // Closing the dialog also leaves the sub-agent page, so reopening starts on
-  // the main form rather than on whichever agent was last viewed.
-  closeSettings: () => set({ settingsOpen: false, editingAgent: null }),
-  openAgent: (agent) => set({ editingAgent: agent }),
+  // Closing the dialog also leaves the sub-agent page and the plugins page,
+  // so reopening starts on the main form rather than on whichever view was
+  // last shown.
+  closeSettings: () => set({ settingsOpen: false, editingAgent: null, pluginsOpen: false }),
+  openAgent: (agent) => set({ editingAgent: agent, pluginsOpen: false }),
   closeAgent: () => set({ editingAgent: null }),
+  openPlugins: () => set({ pluginsOpen: true, editingAgent: null }),
+  closePlugins: () => set({ pluginsOpen: false }),
   rightView: 'status',
   setRightView: (v) => set({ rightView: v }),
 }))
