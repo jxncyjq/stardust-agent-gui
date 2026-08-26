@@ -112,6 +112,34 @@ describe('PluginConsentDialog — clearing every host blocks an http grant befor
   })
 })
 
+// Mirrors the http/hosts block above exactly — same server-side rule
+// (consent.RefuseUnnamedAllowlist), same shape, for the fs/allowed_paths
+// pair instead of http/allowed_hosts.
+describe('PluginConsentDialog — clearing every path blocks an fs grant before submit', () => {
+  it('disables confirm and shows a reason once all paths are unchecked', () => {
+    const plugin = makePlugin({
+      declared_capabilities: ['fs'],
+      declared_allowed_paths: ['/tmp/plugin-a'],
+    })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    const confirmBtn = screen.getByRole('button', { name: '确认并授权' })
+    expect(confirmBtn).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /\/tmp\/plugin-a/ }))
+
+    expect(confirmBtn).toBeDisabled()
+    expect(screen.getByText(/至少保留一个路径/)).toBeInTheDocument()
+    expect(mocks.GrantPlugin).not.toHaveBeenCalled()
+  })
+
+  it('does not block when fs is declared but the plugin declares no paths at all', () => {
+    const plugin = makePlugin({ declared_capabilities: ['fs'], declared_allowed_paths: [] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+    expect(screen.getByRole('button', { name: '确认并授权' })).toBeEnabled()
+  })
+})
+
 describe('PluginConsentDialog — no cancel affordance while converging', () => {
   it('renders zero buttons while the grant request is in flight', async () => {
     let resolveGrant: (v: main.ConsentResultDTO) => void = () => {}
@@ -130,12 +158,38 @@ describe('PluginConsentDialog — no cancel affordance while converging', () => 
     expect(screen.queryAllByRole('button')).toHaveLength(0)
     expect(screen.queryByText('取消')).not.toBeInTheDocument()
 
-    // Backdrop click must not dismiss the dialog either — same rule, a
-    // different trigger.
-    const onClose = vi.fn()
     resolveGrant(main.ConsentResultDTO.createFrom({ name: plugin.name, pending_convergence: false, state: 'loaded' }))
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
-    void onClose // resolved after the assertion window; nothing further to check here
+  })
+
+  it('backdrop click does not dismiss the dialog while the grant request is in flight', async () => {
+    mocks.GrantPlugin.mockReturnValue(new Promise(() => {})) // never resolves — stays "in flight"
+    const onClose = vi.fn()
+    const plugin = makePlugin({ declared_capabilities: [] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={onClose} onResult={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '确认并授权' }))
+    await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument())
+
+    // The dialog's own outer overlay (the backdrop) is the dialog card's
+    // parent element — click it directly, not the card itself.
+    fireEvent.click(screen.getByRole('dialog').parentElement as HTMLElement)
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('backdrop click DOES dismiss the dialog once the request has settled (sanity check for the guard above)', async () => {
+    mocks.GrantPlugin.mockResolvedValue(
+      main.ConsentResultDTO.createFrom({ name: 'sample-plugin', pending_convergence: false, state: 'loaded' }),
+    )
+    const onClose = vi.fn()
+    const plugin = makePlugin({ declared_capabilities: [] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={onClose} onResult={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '确认并授权' }))
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('dialog').parentElement as HTMLElement)
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
   it('shows the retry-convergence affordance (not a cancel) once pending_convergence is true', async () => {
@@ -191,5 +245,52 @@ describe('PluginConsentDialog — deny mode', () => {
 
     await waitFor(() => expect(mocks.DenyPlugin).toHaveBeenCalledWith('sample-plugin'))
     await waitFor(() => expect(onResult).toHaveBeenCalledTimes(1))
+  })
+})
+
+describe('PluginConsentDialog — error recovery is surfaced, not a dead end', () => {
+  it('shows a rejected GrantPlugin call and "返回修改" takes the user back to the editable form', async () => {
+    mocks.GrantPlugin.mockRejectedValueOnce(new Error('server unreachable'))
+    const plugin = makePlugin({ declared_capabilities: ['fs'], declared_allowed_paths: ['/tmp/plugin-a'] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '确认并授权' }))
+    await screen.findByText(/请求失败：server unreachable/)
+
+    fireEvent.click(screen.getByRole('button', { name: '返回修改' }))
+
+    // Back on the editable form: the confirm button and the path checkbox
+    // are there again, and the stale error text is gone.
+    expect(screen.getByRole('button', { name: '确认并授权' })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /\/tmp\/plugin-a/ })).toBeInTheDocument()
+    expect(screen.queryByText(/请求失败/)).not.toBeInTheDocument()
+  })
+
+  it('retries a failed grant via the "重试" button and reaches the success state', async () => {
+    mocks.GrantPlugin.mockRejectedValueOnce(new Error('timeout'))
+    mocks.GrantPlugin.mockResolvedValueOnce(
+      main.ConsentResultDTO.createFrom({ name: 'sample-plugin', pending_convergence: false, state: 'loaded' }),
+    )
+    const plugin = makePlugin({ declared_capabilities: [] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '确认并授权' }))
+    await screen.findByText(/请求失败：timeout/)
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(mocks.GrantPlugin).toHaveBeenCalledTimes(2))
+    await screen.findByText('已生效')
+    expect(screen.queryByText(/请求失败/)).not.toBeInTheDocument()
+  })
+
+  it('surfaces a rejected DenyPlugin call the same way, with a "重试" affordance', async () => {
+    mocks.DenyPlugin.mockRejectedValueOnce(new Error('revoke failed'))
+    const plugin = makePlugin({ state: 'loaded', granted_capabilities: ['fs'] })
+    render(<PluginConsentDialog plugin={plugin} mode="deny" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '确认撤销' }))
+    await screen.findByText(/请求失败：revoke failed/)
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
   })
 })

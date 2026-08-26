@@ -6,6 +6,7 @@ import { ListTasks } from '../../../wailsjs/go/main/App'
 import { XIcon, ChevronDownIcon, ChevronRightIcon, SpinnerIcon } from '../icons'
 import { useUIStore } from '../../stores/uiStore'
 import { confirm, useConfirmStore } from '../../stores/confirmStore'
+import { usePluginConsentStore } from '../../stores/pluginConsentStore'
 import { AgentConfigPage } from './AgentConfigPage'
 import { PluginsPage } from './PluginsPage'
 
@@ -64,6 +65,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       // A confirm dialog opened over this modal (e.g. save-restart warning) owns
       // Esc first; closing the settings modal underneath it would be wrong.
       if (useConfirmStore.getState().request) return
+      // A plugin grant/deny/retry request is converging server-side and has
+      // no abort semantics (see PluginConsentDialog's "no cancel while
+      // submitting" rule) — closing the modal here would look like a cancel
+      // that never actually happens, since the server call keeps running.
+      if (usePluginConsentStore.getState().inFlight > 0) return
       if (e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', onKeyDown)

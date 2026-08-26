@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { main } from '../../../wailsjs/go/models'
 import { GrantPlugin, DenyPlugin } from '../../../wailsjs/go/main/App'
 import { SpinnerIcon } from '../icons'
+import { beginPluginConsent, endPluginConsent } from '../../stores/pluginConsentStore'
 
 // errText renders an unknown error value as a string, matching
 // ApprovalPrompt.tsx's own local helper (this codebase duplicates this
@@ -101,6 +102,10 @@ export function PluginConsentDialog({ plugin, mode, onClose, onResult }: PluginC
   async function submit() {
     setPhase('submitting')
     setError(null)
+    // Registers this request as "in flight" for SettingsModal's Escape guard
+    // (see pluginConsentStore.ts) for as long as the await below is pending —
+    // regardless of whether this component is still mounted when it settles.
+    beginPluginConsent()
     try {
       const res =
         mode === 'grant'
@@ -112,6 +117,8 @@ export function PluginConsentDialog({ plugin, mode, onClose, onResult }: PluginC
     } catch (err) {
       setError(errText(err))
       setPhase('result')
+    } finally {
+      endPluginConsent()
     }
   }
 

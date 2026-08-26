@@ -3,6 +3,7 @@ import { ListPlugins, GrantPlugin, DenyPlugin } from '../../../wailsjs/go/main/A
 import { main } from '../../../wailsjs/go/models'
 import { PluginConsentDialog } from './PluginConsentDialog'
 import { SpinnerIcon } from '../icons'
+import { beginPluginConsent, endPluginConsent } from '../../stores/pluginConsentStore'
 
 // errText renders an unknown error value as a string, matching the small
 // local helper ApprovalPrompt.tsx/PluginConsentDialog.tsx each keep for the
@@ -105,6 +106,10 @@ export function PluginsPage() {
     if (!ov) return
     setRetrying((r) => ({ ...r, [name]: true }))
     setRetryError((e) => ({ ...e, [name]: '' }))
+    // Same "in flight" registration as PluginConsentDialog's submit() — a
+    // row-level retry is the same kind of unabortable server-side
+    // convergence wait, and SettingsModal's Escape guard must see it too.
+    beginPluginConsent()
     try {
       const res =
         ov.mode === 'grant'
@@ -120,6 +125,7 @@ export function PluginsPage() {
       setRetryError((e) => ({ ...e, [name]: errText(err) }))
     } finally {
       setRetrying((r) => ({ ...r, [name]: false }))
+      endPluginConsent()
     }
   }
 
