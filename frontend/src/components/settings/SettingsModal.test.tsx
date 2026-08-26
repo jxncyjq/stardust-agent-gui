@@ -144,6 +144,58 @@ describe('SettingsModal Esc', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(onClose).not.toHaveBeenCalled()
   })
+
+  // Important-1 from the whole-branch final review: the same onClose is also
+  // reachable via the backdrop click and the header X button, neither of
+  // which consulted inFlight before this fix — and unlike
+  // PluginConsentDialog's submitting phase, a row-level retryConvergence has
+  // no overlay of its own to swallow those clicks. This drives the row-retry
+  // path (not the dialog submit path the test above uses) so the spinner has
+  // no buttons and no overlay, then tries every other door.
+  it('does NOT close via the backdrop click or the header X while a row-level convergence retry is in flight, and the X is disabled', async () => {
+    uiState.pluginsOpen = true
+    mocks.ListPlugins.mockResolvedValue([makePlugin({ name: 'sample-plugin', state: 'unauthorized' })])
+    mocks.GrantPlugin.mockResolvedValueOnce(
+      main.ConsentResultDTO.createFrom({
+        name: 'sample-plugin',
+        pending_convergence: true,
+        convergence_detail: 'apply deferred: 1 task still running',
+        granted_capabilities: [],
+        granted_allowed_hosts: [],
+        granted_allowed_paths: [],
+      }),
+    )
+
+    const onClose = vi.fn()
+    const { container } = render(<SettingsModal open onClose={onClose} />)
+
+    const row = await screen.findByRole('group', { name: '插件 sample-plugin' })
+    fireEvent.click(within(row).getByRole('button', { name: '授权' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认并授权' }))
+    await screen.findByText('已授权，等待收敛生效')
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    // Now retry from the row, and never let the retry call resolve — the
+    // exact "row shows a spinner with no buttons" state Important-1 flags.
+    mocks.GrantPlugin.mockReturnValue(new Promise(() => {}))
+    const pendingRow = await screen.findByRole('group', { name: '插件 sample-plugin' })
+    fireEvent.click(within(pendingRow).getByRole('button', { name: '重试收敛' }))
+    await waitFor(() => {
+      const liveRow = screen.getByRole('group', { name: '插件 sample-plugin' })
+      expect(within(liveRow).queryAllByRole('button')).toHaveLength(0)
+    })
+
+    // Door 1: the header X button must be disabled, not just a dead click.
+    const closeButton = screen.getByRole('button', { name: '关闭设置' })
+    expect(closeButton).toBeDisabled()
+    fireEvent.click(closeButton)
+    expect(onClose).not.toHaveBeenCalled()
+
+    // Door 2: the backdrop itself (the modal's outermost fixed overlay).
+    const backdrop = container.firstElementChild as HTMLElement
+    fireEvent.click(backdrop)
+    expect(onClose).not.toHaveBeenCalled()
+  })
 })
 
 describe('SettingsModal — plugin tab wiring', () => {

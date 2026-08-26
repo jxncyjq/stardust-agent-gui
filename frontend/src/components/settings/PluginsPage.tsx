@@ -251,6 +251,14 @@ function PluginRow({
         </div>
       ) : (
         <div className="flex flex-col gap-1">
+          {override?.result.convergence_detail && (
+            // Non-empty here means convergence RAN and reported errors this
+            // entry nonetheless survived (see server.ConsentResult's doc
+            // comment) — a different meaning from the entry's own detail
+            // below, so it renders as its own distinct warning line rather
+            // than being dropped just because this entry converged fine.
+            <p className="text-xs text-amber-600 break-all">收敛警告：{override.result.convergence_detail}</p>
+          )}
           {plugin.declared_unresolved && (
             // Distinct from "this plugin requests nothing" on purpose — see
             // PluginConsentDialog's own doc comment for the same rule

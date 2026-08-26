@@ -53,6 +53,16 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const pluginsOpen = useUIStore((s) => s.pluginsOpen)
   const openPlugins = useUIStore((s) => s.openPlugins)
   const closePlugins = useUIStore((s) => s.closePlugins)
+  // A plugin grant/deny/retry request is converging server-side and has no
+  // abort semantics (see PluginConsentDialog's "no cancel while submitting"
+  // rule) — closing the modal here would look like a cancel that never
+  // actually happens, since the server call keeps running. This same
+  // predicate must gate every door that reaches onClose: Escape, the
+  // backdrop click, and the header X button. A row-level retryConvergence
+  // (PluginsPage.tsx) has no overlay of its own the way PluginConsentDialog's
+  // submitting phase does, so without this the backdrop/X are reachable and
+  // would silently unmount the panel out from under a real in-flight request.
+  const consentInFlight = usePluginConsentStore((s) => s.inFlight > 0)
 
   useEffect(() => {
     if (open) load()
@@ -65,16 +75,12 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       // A confirm dialog opened over this modal (e.g. save-restart warning) owns
       // Esc first; closing the settings modal underneath it would be wrong.
       if (useConfirmStore.getState().request) return
-      // A plugin grant/deny/retry request is converging server-side and has
-      // no abort semantics (see PluginConsentDialog's "no cancel while
-      // submitting" rule) — closing the modal here would look like a cancel
-      // that never actually happens, since the server call keeps running.
-      if (usePluginConsentStore.getState().inFlight > 0) return
+      if (consentInFlight) return
       if (e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose])
+  }, [open, onClose, consentInFlight])
 
   if (!open) return null
 
@@ -97,7 +103,16 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onClick={() => {
+        // Same refusal as the Escape guard above — see consentInFlight's
+        // comment. Without this, the backdrop is a second door that looks
+        // exactly like a cancel and cancels nothing.
+        if (consentInFlight) return
+        onClose()
+      }}
+    >
       <div
         className="bg-background border border-border rounded-lg shadow-xl w-full max-w-[720px] mx-4 max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
@@ -125,9 +140,11 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               </div>
             )}
             <button
-              className="interactive rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted"
+              className="interactive rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent"
               onClick={onClose}
+              disabled={consentInFlight}
               aria-label="关闭设置"
+              title={consentInFlight ? '插件授权正在收敛，暂时无法关闭' : undefined}
             >
               <XIcon />
             </button>

@@ -269,11 +269,25 @@ export function PluginConsentDialog({ plugin, mode, onClose, onResult }: PluginC
             <div className="flex flex-col gap-2">
               <p className="text-xs font-semibold text-destructive">收敛后加载失败</p>
               {result.detail && <p className="text-xs text-muted-foreground break-all">{result.detail}</p>}
+              {result.convergence_detail && (
+                <p className="text-xs text-amber-600 break-all">收敛警告：{result.convergence_detail}</p>
+              )}
             </div>
           )}
 
           {phase === 'result' && result && !result.pending_convergence && result.state !== 'failed' && (
-            <p className="text-xs font-semibold">{mode === 'grant' ? '已生效' : '已撤销'}</p>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-semibold">{mode === 'grant' ? '已生效' : '已撤销'}</p>
+              {result.convergence_detail && (
+                // Non-empty here means convergence ran and reported errors
+                // THIS entry nonetheless survived — an unrelated entry
+                // failing, say (see server.ConsentResult's doc comment).
+                // "Convergence ran, and these errors happened" is a real
+                // state distinct from a clean success line, so it must not
+                // be dropped just because this entry itself converged.
+                <p className="text-xs text-amber-600 break-all">收敛警告：{result.convergence_detail}</p>
+              )}
+            </div>
           )}
         </div>
 

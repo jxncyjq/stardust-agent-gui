@@ -26,6 +26,22 @@ export function beginPluginConsent() {
   usePluginConsentStore.setState((s) => ({ inFlight: s.inFlight + 1 }))
 }
 
+// endPluginConsent decrements inFlight, clamped at zero so the SettingsModal
+// close guard degrades safely rather than latching permanently armed. A
+// negative inFlight is never a legitimate state — it can only mean an
+// unbalanced begin/end call, i.e. a bug in one of the two callers above — so
+// that case is logged loudly rather than silently absorbed by the clamp.
+// This must not throw: both callers invoke endPluginConsent() inside a
+// `finally`, where a thrown assertion would replace a genuine in-flight
+// error with this one.
 export function endPluginConsent() {
-  usePluginConsentStore.setState((s) => ({ inFlight: Math.max(0, s.inFlight - 1) }))
+  usePluginConsentStore.setState((s) => {
+    if (s.inFlight <= 0) {
+      console.error(
+        'pluginConsentStore: endPluginConsent() with inFlight=' + s.inFlight +
+          '; begin/end are unbalanced and the SettingsModal close guard is now unreliable',
+      )
+    }
+    return { inFlight: Math.max(0, s.inFlight - 1) }
+  })
 }

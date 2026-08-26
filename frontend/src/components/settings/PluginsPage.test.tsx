@@ -158,6 +158,36 @@ describe('PluginsPage — pending_convergence and the no-cancel rule', () => {
   })
 })
 
+describe('PluginsPage — convergence_detail on the converged branch is not dropped', () => {
+  it('renders convergence_detail as a warning even though this entry itself converged (pending_convergence false)', async () => {
+    mocks.ListPlugins.mockResolvedValue([makePlugin({ name: 'plugin-a', state: 'unauthorized' })])
+    mocks.GrantPlugin.mockResolvedValue(
+      main.ConsentResultDTO.createFrom({
+        name: 'plugin-a',
+        pending_convergence: false,
+        state: 'loaded',
+        detail: '',
+        convergence_detail: 'plugin-b failed to activate: tool name conflict',
+        granted_capabilities: [],
+        granted_allowed_hosts: [],
+        granted_allowed_paths: [],
+      }),
+    )
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 plugin-a' })
+    fireEvent.click(within(row).getByRole('button', { name: '授权' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认并授权' }))
+    await screen.findByText('已生效')
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    // This entry converged clean (state loaded, not pending) — but an
+    // UNRELATED entry's convergence failure must still be visible here, not
+    // dropped just because plugin-a itself came up fine.
+    const updatedRow = await screen.findByRole('group', { name: '插件 plugin-a' })
+    expect(within(updatedRow).getByText(/plugin-b failed to activate/)).toBeInTheDocument()
+  })
+})
+
 describe('PluginsPage — load failure is surfaced, not swallowed', () => {
   it('shows the error instead of rendering an empty list', async () => {
     mocks.ListPlugins.mockRejectedValue(new Error('plugin access denied'))

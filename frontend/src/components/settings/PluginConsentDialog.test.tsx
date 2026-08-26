@@ -215,6 +215,47 @@ describe('PluginConsentDialog — no cancel affordance while converging', () => 
   })
 })
 
+describe('PluginConsentDialog — convergence_detail on the converged branch is not dropped', () => {
+  it('renders convergence_detail as a warning on the plain success line (pending_convergence false, state not failed)', async () => {
+    mocks.GrantPlugin.mockResolvedValue(
+      main.ConsentResultDTO.createFrom({
+        name: 'sample-plugin',
+        pending_convergence: false,
+        state: 'loaded',
+        detail: '',
+        convergence_detail: 'plugin-b failed to activate: tool name conflict',
+      }),
+    )
+    const plugin = makePlugin({ declared_capabilities: [] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '确认并授权' }))
+
+    await screen.findByText('已生效')
+    expect(screen.getByText(/plugin-b failed to activate/)).toBeInTheDocument()
+  })
+
+  it('renders convergence_detail alongside the failed-load detail (pending_convergence false, state failed)', async () => {
+    mocks.GrantPlugin.mockResolvedValue(
+      main.ConsentResultDTO.createFrom({
+        name: 'sample-plugin',
+        pending_convergence: false,
+        state: 'failed',
+        detail: 'sample-plugin: tool name conflict: fetch',
+        convergence_detail: 'plugin-b failed to activate: tool name conflict',
+      }),
+    )
+    const plugin = makePlugin({ declared_capabilities: [] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '确认并授权' }))
+
+    await screen.findByText('收敛后加载失败')
+    expect(screen.getByText(/sample-plugin: tool name conflict: fetch/)).toBeInTheDocument()
+    expect(screen.getByText(/plugin-b failed to activate/)).toBeInTheDocument()
+  })
+})
+
 describe('PluginConsentDialog — declared_unresolved is not "requests nothing"', () => {
   it('blocks grant with a distinct reason instead of showing an empty checklist', () => {
     const plugin = makePlugin({ declared_capabilities: [], declared_unresolved: true })
