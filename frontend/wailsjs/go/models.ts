@@ -28,6 +28,46 @@ export namespace main {
 	        this.token = source["token"];
 	    }
 	}
+	export class ConsentResultDTO {
+	    name: string;
+	    version: string;
+	    state: string;
+	    detail?: string;
+	    tools: string[];
+	    declared_capabilities: string[];
+	    declared_allowed_hosts: string[];
+	    declared_allowed_paths: string[];
+	    declared_unresolved: boolean;
+	    declared_error?: string;
+	    granted_capabilities: string[];
+	    granted_allowed_hosts: string[];
+	    granted_allowed_paths: string[];
+	    pending_convergence: boolean;
+	    convergence_detail?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConsentResultDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.version = source["version"];
+	        this.state = source["state"];
+	        this.detail = source["detail"];
+	        this.tools = source["tools"];
+	        this.declared_capabilities = source["declared_capabilities"];
+	        this.declared_allowed_hosts = source["declared_allowed_hosts"];
+	        this.declared_allowed_paths = source["declared_allowed_paths"];
+	        this.declared_unresolved = source["declared_unresolved"];
+	        this.declared_error = source["declared_error"];
+	        this.granted_capabilities = source["granted_capabilities"];
+	        this.granted_allowed_hosts = source["granted_allowed_hosts"];
+	        this.granted_allowed_paths = source["granted_allowed_paths"];
+	        this.pending_convergence = source["pending_convergence"];
+	        this.convergence_detail = source["convergence_detail"];
+	    }
+	}
 	export class GateableToolDTO {
 	    name: string;
 	    description: string;
@@ -56,6 +96,42 @@ export namespace main {
 	        this.model = source["model"];
 	        this.context_length = source["context_length"];
 	        this.profile = source["profile"];
+	    }
+	}
+	export class PluginDTO {
+	    name: string;
+	    version: string;
+	    state: string;
+	    detail?: string;
+	    tools: string[];
+	    declared_capabilities: string[];
+	    declared_allowed_hosts: string[];
+	    declared_allowed_paths: string[];
+	    declared_unresolved: boolean;
+	    declared_error?: string;
+	    granted_capabilities: string[];
+	    granted_allowed_hosts: string[];
+	    granted_allowed_paths: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PluginDTO(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.version = source["version"];
+	        this.state = source["state"];
+	        this.detail = source["detail"];
+	        this.tools = source["tools"];
+	        this.declared_capabilities = source["declared_capabilities"];
+	        this.declared_allowed_hosts = source["declared_allowed_hosts"];
+	        this.declared_allowed_paths = source["declared_allowed_paths"];
+	        this.declared_unresolved = source["declared_unresolved"];
+	        this.declared_error = source["declared_error"];
+	        this.granted_capabilities = source["granted_capabilities"];
+	        this.granted_allowed_hosts = source["granted_allowed_hosts"];
+	        this.granted_allowed_paths = source["granted_allowed_paths"];
 	    }
 	}
 	export class SearchHit {

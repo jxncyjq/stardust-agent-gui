@@ -30,6 +30,10 @@ export function DeleteSession(arg1) {
   return window['go']['main']['App']['DeleteSession'](arg1);
 }
 
+export function DenyPlugin(arg1) {
+  return window['go']['main']['App']['DenyPlugin'](arg1);
+}
+
 export function EnsureBrowserStreamStatus(arg1) {
   return window['go']['main']['App']['EnsureBrowserStreamStatus'](arg1);
 }
@@ -66,6 +70,10 @@ export function GetTaskResult(arg1) {
   return window['go']['main']['App']['GetTaskResult'](arg1);
 }
 
+export function GrantPlugin(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GrantPlugin'](arg1, arg2, arg3, arg4);
+}
+
 export function HandoffTask(arg1, arg2, arg3) {
   return window['go']['main']['App']['HandoffTask'](arg1, arg2, arg3);
 }
@@ -92,6 +100,10 @@ export function ListInbox() {
 
 export function ListPendingApprovals() {
   return window['go']['main']['App']['ListPendingApprovals']();
+}
+
+export function ListPlugins() {
+  return window['go']['main']['App']['ListPlugins']();
 }
 
 export function ListRuntimeEvents() {

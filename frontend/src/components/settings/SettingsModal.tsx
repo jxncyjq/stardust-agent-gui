@@ -6,7 +6,9 @@ import { ListTasks } from '../../../wailsjs/go/main/App'
 import { XIcon, ChevronDownIcon, ChevronRightIcon, SpinnerIcon } from '../icons'
 import { useUIStore } from '../../stores/uiStore'
 import { confirm, useConfirmStore } from '../../stores/confirmStore'
+import { usePluginConsentStore } from '../../stores/pluginConsentStore'
 import { AgentConfigPage } from './AgentConfigPage'
+import { PluginsPage } from './PluginsPage'
 
 // activeTaskCount returns how many tracked tasks are still in a non-terminal
 // state, so save can warn that a serve restart will interrupt them.
@@ -48,6 +50,19 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const { path, draft, dirty, saving, error, load, save } = useConfigStore()
   const editingAgent = useUIStore((s) => s.editingAgent)
   const closeAgent = useUIStore((s) => s.closeAgent)
+  const pluginsOpen = useUIStore((s) => s.pluginsOpen)
+  const openPlugins = useUIStore((s) => s.openPlugins)
+  const closePlugins = useUIStore((s) => s.closePlugins)
+  // A plugin grant/deny/retry request is converging server-side and has no
+  // abort semantics (see PluginConsentDialog's "no cancel while submitting"
+  // rule) — closing the modal here would look like a cancel that never
+  // actually happens, since the server call keeps running. This same
+  // predicate must gate every door that reaches onClose: Escape, the
+  // backdrop click, and the header X button. A row-level retryConvergence
+  // (PluginsPage.tsx) has no overlay of its own the way PluginConsentDialog's
+  // submitting phase does, so without this the backdrop/X are reachable and
+  // would silently unmount the panel out from under a real in-flight request.
+  const consentInFlight = usePluginConsentStore((s) => s.inFlight > 0)
 
   useEffect(() => {
     if (open) load()
@@ -60,11 +75,12 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       // A confirm dialog opened over this modal (e.g. save-restart warning) owns
       // Esc first; closing the settings modal underneath it would be wrong.
       if (useConfirmStore.getState().request) return
+      if (consentInFlight) return
       if (e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => document.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose])
+  }, [open, onClose, consentInFlight])
 
   if (!open) return null
 
@@ -87,44 +103,85 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onClick={() => {
+        // Same refusal as the Escape guard above — see consentInFlight's
+        // comment. Without this, the backdrop is a second door that looks
+        // exactly like a cancel and cancels nothing.
+        if (consentInFlight) return
+        onClose()
+      }}
+    >
       <div
         className="bg-background border border-border rounded-lg shadow-xl w-full max-w-[720px] mx-4 max-h-[85vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-4 py-2 border-b border-border">
           <div className="flex flex-col">
-            <span className="text-sm font-semibold">设置 · Agent 配置</span>
+            <span className="text-sm font-semibold">{pluginsOpen ? '设置 · 插件授权' : '设置 · Agent 配置'}</span>
             <span className="text-[10px] text-muted-foreground truncate max-w-[560px]" title={path}>{path}</span>
           </div>
-          <button
-            className="interactive rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted"
-            onClick={onClose}
-            aria-label="关闭设置"
-          >
-            <XIcon />
-          </button>
+          <div className="flex items-center gap-2">
+            {!editingAgent && (
+              <div className="flex items-center gap-1">
+                <button
+                  className={`interactive text-xs px-2 py-1 rounded ${!pluginsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                  onClick={closePlugins}
+                >
+                  配置
+                </button>
+                <button
+                  className={`interactive text-xs px-2 py-1 rounded ${pluginsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                  onClick={openPlugins}
+                >
+                  插件
+                </button>
+              </div>
+            )}
+            <button
+              className="interactive rounded p-1 text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:hover:bg-transparent"
+              onClick={onClose}
+              disabled={consentInFlight}
+              aria-label="关闭设置"
+              title={consentInFlight ? '插件授权正在收敛，暂时无法关闭' : undefined}
+            >
+              <XIcon />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4">
-          {!draft && !error && <p className="text-xs text-muted-foreground py-4">加载中…</p>}
-          {draft && editingAgent && <AgentConfigPage agent={editingAgent} onBack={closeAgent} />}
-          {draft && !editingAgent && CONFIG_SECTIONS.map((s) => <Section key={s.key} section={s} />)}
+          {pluginsOpen ? (
+            <PluginsPage />
+          ) : (
+            <>
+              {!draft && !error && <p className="text-xs text-muted-foreground py-4">加载中…</p>}
+              {draft && editingAgent && <AgentConfigPage agent={editingAgent} onBack={closeAgent} />}
+              {draft && !editingAgent && CONFIG_SECTIONS.map((s) => <Section key={s.key} section={s} />)}
+            </>
+          )}
         </div>
 
-        {error && <p className="text-xs text-destructive px-4 py-1 break-all">保存/加载失败：{error}</p>}
+        {!pluginsOpen && error && <p className="text-xs text-destructive px-4 py-1 break-all">保存/加载失败：{error}</p>}
 
-        <div className="flex items-center justify-end gap-2 px-4 py-2 border-t border-border">
-          <button className="interactive text-xs px-3 py-1 rounded hover:bg-muted text-muted-foreground" onClick={onClose}>取消</button>
-          <button
-            className="interactive flex items-center gap-1.5 text-xs px-3 py-1 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
-            disabled={!dirty || saving}
-            onClick={onSave}
-          >
-            {saving && <SpinnerIcon className="w-3.5 h-3.5" />}
-            <span>{saving ? '保存中…' : '保存并重启'}</span>
-          </button>
-        </div>
+        {/* The plugin panel acts immediately through its own server calls
+            (grant/deny), independent of this draft's save/restart flow, so
+            it has no place in this footer — closing via the X or Esc is
+            enough. */}
+        {!pluginsOpen && (
+          <div className="flex items-center justify-end gap-2 px-4 py-2 border-t border-border">
+            <button className="interactive text-xs px-3 py-1 rounded hover:bg-muted text-muted-foreground" onClick={onClose}>取消</button>
+            <button
+              className="interactive flex items-center gap-1.5 text-xs px-3 py-1 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              disabled={!dirty || saving}
+              onClick={onSave}
+            >
+              {saving && <SpinnerIcon className="w-3.5 h-3.5" />}
+              <span>{saving ? '保存中…' : '保存并重启'}</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
