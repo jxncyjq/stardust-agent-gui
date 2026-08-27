@@ -340,7 +340,13 @@ describe('PluginsPage — fetching a declaration before deciding (Task 5)', () =
     mocks.ListPlugins.mockResolvedValue([
       makePlugin({ name: 'plugin-x', state: 'unauthorized', declared_unresolved: true }),
     ])
-    mocks.ResolvePlugin.mockRejectedValue(new Error('插件包不被信任'))
+    // Rejects with a bare STRING, not `new Error(...)` — this is what a
+    // real Wails binding rejection actually looks like (calls.js rejects
+    // with the raw error string, never an Error instance; see errText's
+    // comment in PluginsPage.tsx). errText()'s `String(err)` branch must
+    // handle this identically to the Error-instance branch other tests in
+    // this file exercise.
+    mocks.ResolvePlugin.mockRejectedValue('插件包不被信任')
     render(<PluginsPage />)
     const row = await screen.findByRole('group', { name: '插件 plugin-x' })
     fireEvent.click(within(row).getByRole('button', { name: '取回声明' }))
@@ -361,5 +367,53 @@ describe('PluginsPage — fetching a declaration before deciding (Task 5)', () =
 
     const updated = await screen.findByRole('group', { name: '插件 plugin-n' })
     expect(within(updated).getByRole('button', { name: '重试' })).toBeInTheDocument()
+  })
+
+  // IMPORTANT-2 from the Task 5 review: onGrant/onDeny at the PluginsPage
+  // level must hand PluginConsentDialog the FETCHED declaration
+  // (resolved[plugin.name]), not the stale pre-fetch `plugin` from `.map()`.
+  // Without that fix, clicking 授权 after a successful fetch opens the
+  // dialog on the original declared_unresolved:true/declared_capabilities:[]
+  // snapshot, and the dialog's own `unresolvedBlocked`/`confirmDisabled`
+  // logic (PluginConsentDialog.tsx:90,109) re-disables "确认并授权" —
+  // silently defeating the entire point of fetching first. Neither the
+  // in-flight test nor the "shows the declaration..." test above opens the
+  // dialog after a fetch, so this is the only test that would catch a
+  // regression on PluginsPage.tsx:216-217.
+  it('opens the consent dialog on the FETCHED declaration, not the stale pre-fetch one, after a successful fetch', async () => {
+    mocks.ListPlugins.mockResolvedValue([
+      makePlugin({ name: 'plugin-f', state: 'unauthorized', declared_capabilities: [], declared_unresolved: true }),
+    ])
+    mocks.ResolvePlugin.mockResolvedValue(
+      main.PluginDTO.createFrom({
+        name: 'plugin-f',
+        state: 'unauthorized',
+        declared_capabilities: ['http'],
+        declared_allowed_hosts: [],
+        declared_allowed_paths: [],
+        declared_unresolved: false,
+        granted_capabilities: [],
+        granted_allowed_hosts: [],
+        granted_allowed_paths: [],
+        tools: [],
+      }),
+    )
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 plugin-f' })
+    fireEvent.click(within(row).getByRole('button', { name: '取回声明' }))
+
+    const updated = await screen.findByRole('group', { name: '插件 plugin-f' })
+    const grantButton = await within(updated).findByRole('button', { name: '授权' })
+    await waitFor(() => expect(grantButton).not.toBeDisabled())
+    fireEvent.click(grantButton)
+
+    const dialog = await screen.findByRole('dialog')
+    // Reflects the FETCHED declaration: the read-only capability list shows
+    // "http" (from the mocked ResolvePlugin response), and the confirm
+    // button is enabled — the strongest assertion available, since a stale
+    // declared_unresolved:true snapshot would keep both of these false.
+    expect(within(dialog).getByText('http')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/该插件的声明尚未在本地解析/)).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '确认并授权' })).not.toBeDisabled()
   })
 })

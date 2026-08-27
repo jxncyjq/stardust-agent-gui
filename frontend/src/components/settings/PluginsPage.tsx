@@ -8,6 +8,16 @@ import { beginPluginConsent, endPluginConsent } from '../../stores/pluginConsent
 // errText renders an unknown error value as a string, matching the small
 // local helper ApprovalPrompt.tsx/PluginConsentDialog.tsx each keep for the
 // same purpose rather than sharing one across files.
+//
+// In production a rejected Wails binding call hands `catch` a bare STRING,
+// not an Error instance: internal/frontend/dispatcher/calls.go sets
+// callbackMessage.Err = err.Error() (a Go string), and the desktop runtime's
+// calls.js rejects the promise with that raw string directly
+// (`callbackData.reject(message.error)`) — it never wraps it in `new
+// Error(...)`. `err instanceof Error` is therefore the UNCOMMON branch here,
+// not the common one; String(err) on a string is the identity, which is why
+// this still resolves correctly. Do not "simplify" this on the assumption
+// that Wails errors normally arrive as Error instances — they don't.
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -16,10 +26,17 @@ function errText(err: unknown): string {
 // message in legionAgentGUI's app_plugins.go (`插件包不被信任`). Go-side,
 // ResolvePlugin identifies a 422 STRUCTURALLY — errors.As against
 // httpStatusError's numeric HTTP status, not by parsing response text (see
-// that function's doc comment). But a Wails-bound method's error crosses to
-// JS as nothing more than the wrapped error's Error() string: no status
-// code, no error type, survives the boundary. So matching this substring
-// really is the only thing the JS side has to key on — not a shortcut
+// that function's doc comment). Wails' options.App does support a
+// structured channel (`ErrorFormatter ErrorFormatter`, wired into the
+// dispatcher at internal/frontend/dispatcher/calls.go), but it is an
+// app-wide hook — adopting it here would change the error shape of every
+// existing binding (GrantPlugin, DenyPlugin, ListPlugins, ...), which is out
+// of scope for this one button. This repo configures no ErrorFormatter, so
+// today a Wails-bound method's error crosses to JS as nothing more than the
+// wrapped error's Error() string (a bare string, see errText's comment
+// above) — no status code, no error type, no structured payload survives
+// the boundary. So matching this substring really is the only thing the JS
+// side has to key on given the current configuration — not a shortcut
 // around a better mechanism, but the actual contract this file depends on.
 // It is fragile in exactly the way that implies: renaming errPluginUntrusted's
 // message on the Go side silently breaks this check with no compile error
