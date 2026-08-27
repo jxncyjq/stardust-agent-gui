@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ListPlugins, GrantPlugin, DenyPlugin } from '../../../wailsjs/go/main/App'
+import { ListPlugins, GrantPlugin, DenyPlugin, ResolvePlugin } from '../../../wailsjs/go/main/App'
 import { main } from '../../../wailsjs/go/models'
 import { PluginConsentDialog } from './PluginConsentDialog'
 import { SpinnerIcon } from '../icons'
@@ -10,6 +10,24 @@ import { beginPluginConsent, endPluginConsent } from '../../stores/pluginConsent
 // same purpose rather than sharing one across files.
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+// UNTRUSTED_MARKER must stay byte-for-byte in sync with errPluginUntrusted's
+// message in legionAgentGUI's app_plugins.go (`插件包不被信任`). Go-side,
+// ResolvePlugin identifies a 422 STRUCTURALLY — errors.As against
+// httpStatusError's numeric HTTP status, not by parsing response text (see
+// that function's doc comment). But a Wails-bound method's error crosses to
+// JS as nothing more than the wrapped error's Error() string: no status
+// code, no error type, survives the boundary. So matching this substring
+// really is the only thing the JS side has to key on — not a shortcut
+// around a better mechanism, but the actual contract this file depends on.
+// It is fragile in exactly the way that implies: renaming errPluginUntrusted's
+// message on the Go side silently breaks this check with no compile error
+// on either side.
+const UNTRUSTED_MARKER = '插件包不被信任'
+
+function isUntrustedResolveError(message: string): boolean {
+  return message.includes(UNTRUSTED_MARKER)
 }
 
 // ConsentOverride is what a completed Grant/Deny call leaves behind for one
@@ -72,6 +90,14 @@ export function PluginsPage() {
   const [dialog, setDialog] = useState<{ plugin: main.PluginDTO; mode: 'grant' | 'deny' } | null>(null)
   const [retrying, setRetrying] = useState<Record<string, boolean>>({})
   const [retryError, setRetryError] = useState<Record<string, string>>({})
+  const [resolving, setResolving] = useState<Record<string, boolean>>({})
+  const [resolveError, setResolveError] = useState<Record<string, string>>({})
+  // resolved holds the successful ResolvePlugin() view per plugin name. It is
+  // deliberately NOT cleared by load(): fetching does not write plugins.json
+  // (Rule 2 in the brief this implements), so a manual refresh must not make
+  // the operator lose a fetch they already paid the download cost for, or
+  // "已取回并缓存该插件包" would stop being true the moment they clicked 刷新.
+  const [resolved, setResolved] = useState<Record<string, main.PluginDTO>>({})
 
   // load fetches the authoritative list from the server and clears every
   // override: a fresh List() result is the truth this page defers to, and
@@ -129,6 +155,29 @@ export function PluginsPage() {
     }
   }
 
+  // resolveDeclaration fetches and verifies one plugin's package (Task 4's
+  // ResolvePlugin, POST /v1/plugins/{name}/resolve) WITHOUT authorizing
+  // anything, so an operator can preview an uncached remote package's
+  // declaration before deciding whether to grant it. It really downloads,
+  // so it registers in flight exactly the way retryConvergence does above:
+  // SettingsModal's Escape / title-bar X / backdrop-click guards must be
+  // able to see it, or an operator pressing Escape closes the window while
+  // the server is still downloading.
+  async function resolveDeclaration(name: string) {
+    setResolving((r) => ({ ...r, [name]: true }))
+    setResolveError((e) => ({ ...e, [name]: '' }))
+    beginPluginConsent()
+    try {
+      const res = await ResolvePlugin(name)
+      setResolved((prev) => ({ ...prev, [name]: res }))
+    } catch (err) {
+      setResolveError((e) => ({ ...e, [name]: errText(err) }))
+    } finally {
+      setResolving((r) => ({ ...r, [name]: false }))
+      endPluginConsent()
+    }
+  }
+
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between py-2 border-b border-border">
@@ -156,9 +205,18 @@ export function PluginsPage() {
             override={overrides[plugin.name]}
             retrying={!!retrying[plugin.name]}
             retryError={retryError[plugin.name] ?? ''}
-            onGrant={() => setDialog({ plugin, mode: 'grant' })}
-            onDeny={() => setDialog({ plugin, mode: 'deny' })}
+            resolved={resolved[plugin.name]}
+            resolving={!!resolving[plugin.name]}
+            resolveError={resolveError[plugin.name] ?? ''}
+            // A fetched declaration (resolved[plugin.name]) supersedes the
+            // stale one ListPlugins returned, or the dialog would open on the
+            // ORIGINAL declared_unresolved:true/empty-capabilities view and
+            // stay stuck disabling its own confirm button — silently
+            // defeating the whole point of fetching first.
+            onGrant={() => setDialog({ plugin: resolved[plugin.name] ?? plugin, mode: 'grant' })}
+            onDeny={() => setDialog({ plugin: resolved[plugin.name] ?? plugin, mode: 'deny' })}
             onRetryConvergence={() => retryConvergence(plugin.name)}
+            onResolve={() => resolveDeclaration(plugin.name)}
           />
         ))}
       </div>
@@ -182,18 +240,37 @@ function PluginRow({
   override,
   retrying,
   retryError,
+  resolved,
+  resolving,
+  resolveError,
   onGrant,
   onDeny,
   onRetryConvergence,
+  onResolve,
 }: {
   plugin: main.PluginDTO
   override?: ConsentOverride
   retrying: boolean
   retryError: string
+  // resolved is the successful ResolvePlugin() view for this plugin, if the
+  // operator has fetched its declaration this session. It only ever narrows
+  // declared_unresolved from true to false — see resolveDeclaration's own
+  // comment for why it survives a manual list refresh.
+  resolved?: main.PluginDTO
+  resolving: boolean
+  resolveError: string
   onGrant: () => void
   onDeny: () => void
   onRetryConvergence: () => void
+  onResolve: () => void
 }) {
+  // effectivePlugin is what this row actually renders declared_* from: once
+  // a fetch has succeeded, the row shows what was JUST fetched, not the
+  // stale declared_unresolved:true snapshot ListPlugins returned before the
+  // fetch. name/version keep coming from `plugin` — ResolvePlugin's request
+  // path is keyed by name, so that never changes across a fetch.
+  const effectivePlugin = resolved ?? plugin
+  const untrustedResolve = resolveError !== '' && isUntrustedResolveError(resolveError)
   // PendingConvergence has no bearing on plugin.state at all — it means the
   // write already landed but nothing converged, so State/Detail/Tools on
   // the response are empty by contract (see server.ConsentResult's doc
@@ -268,7 +345,7 @@ function PluginRow({
             // than being dropped just because this entry converged fine.
             <p className="text-xs text-amber-600 break-all">收敛警告：{override.result.convergence_detail}</p>
           )}
-          {plugin.declared_error ? (
+          {effectivePlugin.declared_error ? (
             // declared_error means DeclaredUnresolved is true for the OTHER
             // reason: the declaration failed to load (corrupted plugin.wasm,
             // package dir removed from disk, …), not a not-yet-cached remote
@@ -280,14 +357,65 @@ function PluginRow({
             // explanation) in destructive color because this is the reason
             // the DECLARATION itself could not be read, a different failure
             // than a load/activation failure.
-            <p className="text-xs text-destructive break-all">插件声明解析失败：{plugin.declared_error}</p>
+            <p className="text-xs text-destructive break-all">插件声明解析失败：{effectivePlugin.declared_error}</p>
           ) : (
-            plugin.declared_unresolved && (
+            effectivePlugin.declared_unresolved && (
               // Distinct from "this plugin requests nothing" on purpose —
               // see PluginConsentDialog's own doc comment for the same rule
               // inside the grant dialog.
               <p className="text-xs text-muted-foreground">该插件的能力声明尚未在本地解析（远程包尚未缓存）。</p>
             )
+          )}
+          {resolved && (
+            // Persistent, not a toast: fetching (Rule 2) leaves the package
+            // in the server's cache regardless of whether the operator ever
+            // authorizes it, and that fact stays true past this render, so
+            // it must not fade out on its own the way a toast would.
+            <p className="text-xs text-muted-foreground">已取回并缓存该插件包（未授权，可随时撤销）。</p>
+          )}
+          {resolving && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-1" role="status">
+              <SpinnerIcon className="w-3.5 h-3.5" />
+              <span>正在取回声明，请稍候……</span>
+            </div>
+          )}
+          {!resolving && resolveError !== '' && untrustedResolve && (
+            // Rule 4, untrusted branch: an alert with NO retry button.
+            // Retrying can never make an untrusted package trusted — a
+            // control that cannot work is the same class of lie a cancel
+            // button that cancels nothing would be.
+            <p className="text-xs font-semibold text-destructive break-all" role="alert">
+              该插件包未通过信任校验，重试无法解决此问题，请联系插件包的提供方：{resolveError}
+            </p>
+          )}
+          {!resolving && resolveError !== '' && !untrustedResolve && (
+            // Rule 4, every other failure: plain error + retry, since these
+            // ARE plausibly transient (network, no cache configured, …).
+            <div className="flex flex-col gap-1">
+              <p className="text-xs text-destructive break-all">取回声明失败：{resolveError}</p>
+              <div>
+                <button
+                  type="button"
+                  className="interactive text-xs px-2 py-1 rounded border border-input hover:bg-muted text-muted-foreground"
+                  onClick={onResolve}
+                >
+                  重试
+                </button>
+              </div>
+            </div>
+          )}
+          {!resolving && resolveError === '' && effectivePlugin.declared_unresolved && (
+            <div>
+              {/* Rule 1: secondary styling — fetching is not the goal,
+                  authorizing is. */}
+              <button
+                type="button"
+                className="interactive text-xs px-2 py-1 rounded border border-input hover:bg-muted text-muted-foreground"
+                onClick={onResolve}
+              >
+                取回声明
+              </button>
+            </div>
           )}
           {state === 'unauthorized' && (
             <>
@@ -295,8 +423,9 @@ function PluginRow({
               <div>
                 <button
                   type="button"
-                  className="interactive text-xs px-2 py-1 rounded bg-primary text-primary-foreground hover:opacity-90"
+                  className="interactive text-xs px-2 py-1 rounded bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
                   onClick={onGrant}
+                  disabled={effectivePlugin.declared_unresolved}
                 >
                   授权
                 </button>
@@ -309,8 +438,9 @@ function PluginRow({
               <div>
                 <button
                   type="button"
-                  className="interactive text-xs px-2 py-1 rounded border border-input hover:bg-muted text-muted-foreground"
+                  className="interactive text-xs px-2 py-1 rounded border border-input hover:bg-muted text-muted-foreground disabled:opacity-50"
                   onClick={onGrant}
+                  disabled={effectivePlugin.declared_unresolved}
                 >
                   重新授权
                 </button>
@@ -327,8 +457,9 @@ function PluginRow({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  className="interactive text-xs px-2 py-1 rounded border border-input hover:bg-muted text-muted-foreground"
+                  className="interactive text-xs px-2 py-1 rounded border border-input hover:bg-muted text-muted-foreground disabled:opacity-50"
                   onClick={onGrant}
+                  disabled={effectivePlugin.declared_unresolved}
                 >
                   重新授权
                 </button>
