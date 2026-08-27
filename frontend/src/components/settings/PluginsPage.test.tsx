@@ -144,6 +144,46 @@ describe('PluginsPage — pending_convergence and the no-cancel rule', () => {
     expect(within(updatedRow).getByRole('button', { name: '重试收敛' })).toBeInTheDocument()
   })
 
+  it('drops the pre-grant explanation once the grant succeeds, even though the result omits detail', async () => {
+    // Caught on a real machine, not by any test: the row showed the new state
+    // ("运行中") above the OLD pre-grant line telling the operator the plugin had
+    // never been authorized and to go run `agent plugins grant`. Server-side
+    // `detail` is `json:"detail,omitempty"`, so a successful grant -- which has
+    // nothing to report -- omits the field entirely and it arrives undefined.
+    // Resolving it with `?? plugin.detail` then backfilled the stale text, while
+    // `state` (no omitempty) updated correctly. Hence one row, two fields,
+    // contradicting each other. This fixture reproduces the real payload by
+    // NOT setting detail at all.
+    mocks.ListPlugins.mockResolvedValue([
+      makePlugin({
+        name: 'plugin-s',
+        state: 'unauthorized',
+        detail: 'reason=plugins.json records no grant block for this entry, so it has never been authorized here',
+      }),
+    ])
+    mocks.GrantPlugin.mockResolvedValue(
+      main.ConsentResultDTO.createFrom({
+        name: 'plugin-s',
+        state: 'loaded',
+        pending_convergence: false,
+        granted_capabilities: ['log'],
+        granted_allowed_hosts: [],
+        granted_allowed_paths: [],
+        tools: ['echo_tool'],
+      }),
+    )
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 plugin-s' })
+    fireEvent.click(within(row).getByRole('button', { name: '授权' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认并授权' }))
+    await screen.findByText('已生效')
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    const updatedRow = await screen.findByRole('group', { name: '插件 plugin-s' })
+    expect(within(updatedRow).queryByText(/never been authorized here/)).not.toBeInTheDocument()
+    expect(within(updatedRow).queryByText(/agent plugins grant/)).not.toBeInTheDocument()
+  })
+
   it('never renders a cancel button anywhere while a grant request is converging', async () => {
     mocks.ListPlugins.mockResolvedValue([makePlugin({ name: 'plugin-w', state: 'unauthorized' })])
     mocks.GrantPlugin.mockReturnValue(new Promise(() => {})) // never resolves — simulates the apply_wait_ms wait

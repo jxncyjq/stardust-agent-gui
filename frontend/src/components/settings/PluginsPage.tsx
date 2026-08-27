@@ -201,8 +201,17 @@ function PluginRow({
   // the LAST list fetch happened to show, misrepresenting "authorized,
   // awaiting convergence" as unrelated old state.
   const pending = override?.result.pending_convergence ?? false
-  const state = pending ? '' : (override?.result.state ?? plugin.state)
-  const detail = pending ? '' : (override?.result.detail ?? plugin.detail ?? '')
+  // Once an override exists this row HAS been acted on, so the whole row comes
+  // from that one result -- never a field-by-field mix of new and stale. `??`
+  // per field looks equivalent and is not: `detail` is `json:"detail,omitempty"`,
+  // so a successful grant (nothing to report) omits it entirely and arrives as
+  // undefined, which `??` then backfills from the PREVIOUS list fetch. That
+  // rendered a freshly mounted plugin as "running" above the pre-grant line
+  // "it has never been authorized here; run agent plugins grant" -- two fields
+  // of one row contradicting each other. `state` has no omitempty and so
+  // updated correctly, which is exactly what made the mismatch visible.
+  const state = pending ? '' : override ? override.result.state : plugin.state
+  const detail = pending ? '' : override ? (override.result.detail ?? '') : (plugin.detail ?? '')
 
   return (
     <div
