@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"testing"
@@ -237,5 +238,38 @@ func TestDenyPluginValidatesName(t *testing.T) {
 	a := NewApp("")
 	if _, err := a.DenyPlugin(""); err == nil {
 		t.Error("DenyPlugin(empty name) = nil, want error")
+	}
+}
+
+// TestPluginBindingsFailLoudBeforeServeHasAPort pins the not-ready guard.
+//
+// Caught on a real machine: opening the plugin tab immediately after launch,
+// before the embedded serve had bound its listener, made BaseURL() format
+// "http://127.0.0.1:0" — a syntactically valid URL that can never connect —
+// and the panel showed the operator
+// "dial tcp 127.0.0.1:0: connectex: The requested address is not valid in its
+// context". That is a transport error standing in for a not-started-yet
+// condition, and it tells the reader nothing about what to do. Formatting a
+// port the serve does not have is the "凑个值接着跑" CLAUDE.md section 0
+// forbids, so both helpers refuse before dialling.
+func TestPluginBindingsFailLoudBeforeServeHasAPort(t *testing.T) {
+	a := NewApp("") // no serve started: a.serve.port is still 0
+
+	if _, err := a.ListPlugins(); err == nil {
+		t.Fatal("ListPlugins with no serve port = nil error, want a not-ready error")
+	} else if !errors.Is(err, errServeNotReady) {
+		t.Errorf("ListPlugins error = %v, want it to wrap errServeNotReady", err)
+	}
+
+	if _, err := a.GrantPlugin("any", []string{"log"}, nil, nil); err == nil {
+		t.Fatal("GrantPlugin with no serve port = nil error, want a not-ready error")
+	} else if !errors.Is(err, errServeNotReady) {
+		t.Errorf("GrantPlugin error = %v, want it to wrap errServeNotReady", err)
+	}
+
+	if _, err := a.DenyPlugin("any"); err == nil {
+		t.Fatal("DenyPlugin with no serve port = nil error, want a not-ready error")
+	} else if !errors.Is(err, errServeNotReady) {
+		t.Errorf("DenyPlugin error = %v, want it to wrap errServeNotReady", err)
 	}
 }
