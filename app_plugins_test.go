@@ -241,6 +241,66 @@ func TestDenyPluginValidatesName(t *testing.T) {
 	}
 }
 
+// TestResolvePluginDecodesTheView verifies a normal 200 from the resolve
+// endpoint decodes into the same PluginDTO shape GET /v1/plugins uses.
+func TestResolvePluginDecodesTheView(t *testing.T) {
+	a := newFakeBackendApp(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/plugins/weather/resolve" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"name":"weather","version":"1.0.0","state":"unauthorized","tools":[],"declared_capabilities":["http"],"declared_allowed_hosts":[],"declared_allowed_paths":[],"declared_unresolved":false,"granted_capabilities":[],"granted_allowed_hosts":[],"granted_allowed_paths":[]}`))
+	})
+
+	view, err := a.ResolvePlugin("weather")
+	if err != nil {
+		t.Fatalf("ResolvePlugin: %v", err)
+	}
+	if view.DeclaredUnresolved {
+		t.Error("DeclaredUnresolved = true after a successful resolve, want false")
+	}
+	if len(view.DeclaredCapabilities) != 1 || view.DeclaredCapabilities[0] != "http" {
+		t.Errorf("DeclaredCapabilities = %v, want [http]", view.DeclaredCapabilities)
+	}
+}
+
+// TestResolvePluginMarksA422AsUntrusted verifies a 422 (package obtained but
+// not trustworthy) is classified via errPluginUntrusted, so the panel can
+// tell "not trustworthy" apart from every other failure and offer no retry.
+func TestResolvePluginMarksA422AsUntrusted(t *testing.T) {
+	a := newFakeBackendApp(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		w.Write([]byte(`{"error":"resolve plugin \"weather\": plugin package is not trusted"}`))
+	})
+
+	_, err := a.ResolvePlugin("weather")
+	if err == nil {
+		t.Fatal("ResolvePlugin on a 422 = nil error, want an untrusted-package error")
+	}
+	if !errors.Is(err, errPluginUntrusted) {
+		t.Errorf("ResolvePlugin error = %v, want it to wrap errPluginUntrusted", err)
+	}
+}
+
+// TestResolvePluginFailsLoudOnOtherNon2xx verifies a 500 is NOT classified as
+// untrusted: only 422 means "cannot be trusted", every other failure is an
+// ordinary transient/operational error.
+func TestResolvePluginFailsLoudOnOtherNon2xx(t *testing.T) {
+	a := newFakeBackendApp(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"resolve plugin \"weather\": disk on fire"}`))
+	})
+
+	_, err := a.ResolvePlugin("weather")
+	if err == nil {
+		t.Fatal("ResolvePlugin on a 500 = nil error, want an error")
+	}
+	if errors.Is(err, errPluginUntrusted) {
+		t.Errorf("ResolvePlugin error = %v, want a 500 NOT classified as untrusted", err)
+	}
+}
+
 // TestPluginBindingsFailLoudBeforeServeHasAPort pins the not-ready guard.
 //
 // Caught on a real machine: opening the plugin tab immediately after launch,

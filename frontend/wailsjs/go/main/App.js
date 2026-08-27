@@ -158,6 +158,10 @@ export function RenameSession(arg1, arg2) {
   return window['go']['main']['App']['RenameSession'](arg1, arg2);
 }
 
+export function ResolvePlugin(arg1) {
+  return window['go']['main']['App']['ResolvePlugin'](arg1);
+}
+
 export function RevealInExplorer(arg1) {
   return window['go']['main']['App']['RevealInExplorer'](arg1);
 }
