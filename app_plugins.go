@@ -31,20 +31,30 @@ import (
 // not-yet-fetched state, not a failure). Mirrors legionAgent's
 // internal/server/plugins.go PluginView.DeclaredError field-for-field; see
 // its doc comment for the full case breakdown.
+//
+// DeclaredUnresolvedReason says WHICH situation set DeclaredUnresolved, and
+// the panel keys its 取回声明 (fetch) button on it rather than on the bare
+// boolean: a remote package merely not cached yet IS fetchable, while a
+// deployment with no plugins.cache configured, and a package that fails to
+// load, are not — offering a fetch on those is a control that can never
+// work. Mirrors legionAgent's internal/server/plugins.go
+// PluginView.DeclaredUnresolvedReason field-for-field; the values it can
+// take are that package's DeclaredUnresolved* constants.
 type PluginDTO struct {
-	Name                 string   `json:"name"`
-	Version              string   `json:"version"`
-	State                string   `json:"state"`
-	Detail               string   `json:"detail,omitempty"`
-	Tools                []string `json:"tools"`
-	DeclaredCapabilities []string `json:"declared_capabilities"`
-	DeclaredAllowedHosts []string `json:"declared_allowed_hosts"`
-	DeclaredAllowedPaths []string `json:"declared_allowed_paths"`
-	DeclaredUnresolved   bool     `json:"declared_unresolved"`
-	DeclaredError        string   `json:"declared_error,omitempty"`
-	GrantedCapabilities  []string `json:"granted_capabilities"`
-	GrantedAllowedHosts  []string `json:"granted_allowed_hosts"`
-	GrantedAllowedPaths  []string `json:"granted_allowed_paths"`
+	Name                     string   `json:"name"`
+	Version                  string   `json:"version"`
+	State                    string   `json:"state"`
+	Detail                   string   `json:"detail,omitempty"`
+	Tools                    []string `json:"tools"`
+	DeclaredCapabilities     []string `json:"declared_capabilities"`
+	DeclaredAllowedHosts     []string `json:"declared_allowed_hosts"`
+	DeclaredAllowedPaths     []string `json:"declared_allowed_paths"`
+	DeclaredUnresolved       bool     `json:"declared_unresolved"`
+	DeclaredUnresolvedReason string   `json:"declared_unresolved_reason,omitempty"`
+	DeclaredError            string   `json:"declared_error,omitempty"`
+	GrantedCapabilities      []string `json:"granted_capabilities"`
+	GrantedAllowedHosts      []string `json:"granted_allowed_hosts"`
+	GrantedAllowedPaths      []string `json:"granted_allowed_paths"`
 }
 
 // ConsentResultDTO is the response body of GrantPlugin/DenyPlugin: the
@@ -251,6 +261,20 @@ func (a *App) DenyPlugin(name string) (ConsentResultDTO, error) {
 // an untrusted key). The settings panel must not offer a retry for it —
 // retrying cannot make an untrusted package trusted, and a control that can
 // never work is the class of lie this panel exists to avoid.
+//
+// ITS MESSAGE TEXT IS A CROSS-LANGUAGE CONTRACT. CHANGING THE STRING IS A
+// BREAKING CHANGE. This repo configures no Wails ErrorFormatter, so a
+// binding's error crosses to JS as nothing but this error chain's Error()
+// string — no status code, no type, no structured payload survives. The
+// panel therefore identifies the untrusted class by matching this exact
+// text: see UNTRUSTED_MARKER in
+// frontend/src/components/settings/PluginsPage.tsx, whose own comment
+// explains why substring matching is the only mechanism available there.
+// Rewording this message without editing UNTRUSTED_MARKER in the same commit
+// silently turns the no-retry alert back into a retry button — a trust
+// verdict presented as a transient failure — with no compile error on either
+// side. TestErrPluginUntrustedMessageIsTheContractTheGUIMatches pins the
+// literal so a rename fails loudly here instead.
 var errPluginUntrusted = errors.New("插件包不被信任")
 
 // ResolvePlugin fetches and verifies one plugin's package so the panel can

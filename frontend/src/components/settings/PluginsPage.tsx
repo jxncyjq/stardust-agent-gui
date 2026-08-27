@@ -47,6 +47,51 @@ function isUntrustedResolveError(message: string): boolean {
   return message.includes(UNTRUSTED_MARKER)
 }
 
+// UNRESOLVED_NOT_CACHED / UNRESOLVED_NO_CACHE mirror two of legionAgent's
+// internal/server/plugins.go DeclaredUnresolved* constants, carried over the
+// wire as PluginDTO.declared_unresolved_reason.
+//
+// They exist because declared_unresolved alone is true in three different
+// server-side situations and a fetch is the remedy for exactly ONE of them:
+//
+//   not_cached          — a remote package simply not downloaded yet.
+//                         取回声明 works. This is the only fetchable case.
+//   no_cache_configured — the deployment configured no "plugins.cache", so
+//                         resolvePluginPackageDir refuses before it fetches.
+//                         The remedy is a config edit plus a serve restart;
+//                         nothing in this panel can produce it.
+//   load_failed         — the package resolved but would not load (corrupt
+//                         plugin.wasm, missing plugin.json, deleted local
+//                         source). A local entry makes no network call at
+//                         all and a remote one is a cache HIT that short-
+//                         circuits before fetching, so a fetch re-reads the
+//                         same broken bytes forever. Rendered by the
+//                         declared_error branch below, which always
+//                         accompanies this reason.
+//
+// Unlike UNTRUSTED_MARKER above, a drift here fails CLOSED: an unrecognised
+// (or absent, from a server predating the field) reason takes the default
+// branch — a plain note and NO fetch button. A missing remedy is recoverable
+// from the CLI; a button that cannot work is the lie this panel exists to
+// avoid.
+const UNRESOLVED_NOT_CACHED = 'not_cached'
+const UNRESOLVED_NO_CACHE = 'no_cache_configured'
+
+// unresolvedNote is the row's explanation for declared_unresolved, per
+// reason. The generic default deliberately does NOT claim a cache state: the
+// old single sentence said "远程包尚未缓存" for every case, which is simply
+// false when the deployment has no cache to miss.
+function unresolvedNote(reason: string): string {
+  switch (reason) {
+    case UNRESOLVED_NOT_CACHED:
+      return '该插件的能力声明尚未在本地解析（远程包尚未缓存）。'
+    case UNRESOLVED_NO_CACHE:
+      return '该插件的能力声明无法在本地解析：此部署未配置插件缓存目录（plugins.cache），远程包没有可写入的位置。请修改部署配置后重启 agent serve —— 此面板无法取回。'
+    default:
+      return '该插件的能力声明尚未在本地解析。'
+  }
+}
+
 // ConsentOverride is what a completed Grant/Deny call leaves behind for one
 // plugin row, so the row can render the fresh outcome immediately instead of
 // waiting on a manual refresh (ListPlugins carries no push/SSE channel).
@@ -55,6 +100,33 @@ function isUntrustedResolveError(message: string): boolean {
 interface ConsentOverride {
   result: main.ConsentResultDTO
   mode: 'grant' | 'deny'
+}
+
+// denyDialogView is the plugin as the DENY dialog must see it.
+//
+// Each dialog mode reads a different field group, and the freshest source for
+// each group is a different object — so there is no one "latest plugin" to
+// hand both. Deny renders "当前已授权的能力（只读）" from granted_*, and the
+// freshest granted_* is:
+//
+//   1. the override, if this row was granted/denied this session — the server
+//      wrote those fields and reported them back, and nothing has re-listed
+//      since (onResult stores the result; it does not reload);
+//   2. otherwise the row from the last ListPlugins.
+//
+// Never `resolved`: PluginConsentService.Resolve fills granted_* from
+// entry.Grant AS OF THE FETCH, and `resolved` is deliberately never cleared,
+// so it is the one source guaranteed to go stale. Deny has no use for the
+// declared_* fields the resolved view IS fresher for (its own
+// unresolvedBlocked is `mode === 'grant' && …`).
+function denyDialogView(plugin: main.PluginDTO, override?: ConsentOverride): main.PluginDTO {
+  if (!override) return plugin
+  return main.PluginDTO.createFrom({
+    ...plugin,
+    granted_capabilities: override.result.granted_capabilities,
+    granted_allowed_hosts: override.result.granted_allowed_hosts,
+    granted_allowed_paths: override.result.granted_allowed_paths,
+  })
 }
 
 // STATE_LABELS/STATE_BADGE_CLASS cover every state internal/cli's
@@ -225,13 +297,21 @@ export function PluginsPage() {
             resolved={resolved[plugin.name]}
             resolving={!!resolving[plugin.name]}
             resolveError={resolveError[plugin.name] ?? ''}
-            // A fetched declaration (resolved[plugin.name]) supersedes the
-            // stale one ListPlugins returned, or the dialog would open on the
-            // ORIGINAL declared_unresolved:true/empty-capabilities view and
-            // stay stuck disabling its own confirm button — silently
-            // defeating the whole point of fetching first.
+            // GRANT gets the fetched declaration (resolved[plugin.name]): it
+            // supersedes the stale one ListPlugins returned, or the dialog
+            // opens on the ORIGINAL declared_unresolved:true/empty-
+            // capabilities view and stays stuck disabling its own confirm
+            // button — silently defeating the whole point of fetching first.
             onGrant={() => setDialog({ plugin: resolved[plugin.name] ?? plugin, mode: 'grant' })}
-            onDeny={() => setDialog({ plugin: resolved[plugin.name] ?? plugin, mode: 'deny' })}
+            // DENY must NOT get the resolved view: it reads granted_*, and
+            // that is the one group the resolved DTO is STALER for. Handing
+            // it over pins the dialog to the pre-fetch grant state for the
+            // rest of the session — fetch, grant http, then 撤销授权, and the
+            // dialog shows an EMPTY 当前已授权的能力 list, asking the operator
+            // to confirm a revocation without showing what is being revoked,
+            // which is that dialog's entire job. See denyDialogView for where
+            // the freshest granted_* actually lives.
+            onDeny={() => setDialog({ plugin: denyDialogView(plugin, overrides[plugin.name]), mode: 'deny' })}
             onRetryConvergence={() => retryConvergence(plugin.name)}
             onResolve={() => resolveDeclaration(plugin.name)}
           />
@@ -288,6 +368,14 @@ function PluginRow({
   // path is keyed by name, so that never changes across a fetch.
   const effectivePlugin = resolved ?? plugin
   const untrustedResolve = resolveError !== '' && isUntrustedResolveError(resolveError)
+  // fetchable is the gate for BOTH 取回声明 and its 重试. declared_unresolved
+  // alone is not that gate: it is also true where no fetch can ever succeed
+  // (no plugins.cache configured; a package that fails to load), and a
+  // control offered there is the same class of lie as the retry this file
+  // already refuses to render for an untrusted package. See
+  // UNRESOLVED_NOT_CACHED's comment for the three cases.
+  const fetchable =
+    effectivePlugin.declared_unresolved && effectivePlugin.declared_unresolved_reason === UNRESOLVED_NOT_CACHED
   // PendingConvergence has no bearing on plugin.state at all — it means the
   // write already landed but nothing converged, so State/Detail/Tools on
   // the response are empty by contract (see server.ConsentResult's doc
@@ -373,14 +461,20 @@ function PluginRow({
             // branch). Rendered distinct from `detail` (the loader's state
             // explanation) in destructive color because this is the reason
             // the DECLARATION itself could not be read, a different failure
-            // than a load/activation failure.
+            // than a load/activation failure. This branch is exactly the
+            // load_failed reason (the server always sets declared_error with
+            // it), and `fetchable` is false throughout it: re-fetching reads
+            // the same broken bytes forever.
             <p className="text-xs text-destructive break-all">插件声明解析失败：{effectivePlugin.declared_error}</p>
           ) : (
             effectivePlugin.declared_unresolved && (
               // Distinct from "this plugin requests nothing" on purpose —
               // see PluginConsentDialog's own doc comment for the same rule
-              // inside the grant dialog.
-              <p className="text-xs text-muted-foreground">该插件的能力声明尚未在本地解析（远程包尚未缓存）。</p>
+              // inside the grant dialog. The wording depends on WHY it is
+              // unresolved: see unresolvedNote.
+              <p className="text-xs text-muted-foreground">
+                {unresolvedNote(effectivePlugin.declared_unresolved_reason ?? '')}
+              </p>
             )
           )}
           {resolved && (
@@ -388,7 +482,20 @@ function PluginRow({
             // in the server's cache regardless of whether the operator ever
             // authorizes it, and that fact stays true past this render, so
             // it must not fade out on its own the way a toast would.
-            <p className="text-xs text-muted-foreground">已取回并缓存该插件包（未授权，可随时撤销）。</p>
+            //
+            // Only the CACHE half stays true forever, though. The
+            // "（未授权，可随时撤销）" clarification is about the fetch not
+            // having authorized anything, and it stops being true the instant
+            // the operator grants — leaving a 运行中 badge stacked directly
+            // above a line asserting 未授权, the same two-fields-of-one-row
+            // contradiction the `detail ??` backfill post-mortem below
+            // records. `resolved` is never cleared and load() clears only
+            // `overrides`, so it would survive a 刷新 too. Gating it on the
+            // row still being undecided keeps the persistent cache fact and
+            // drops the claim that went stale.
+            <p className="text-xs text-muted-foreground">
+              {state === 'unauthorized' ? '已取回并缓存该插件包（未授权，可随时撤销）。' : '已取回并缓存该插件包。'}
+            </p>
           )}
           {resolving && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground py-1" role="status">
@@ -406,25 +513,35 @@ function PluginRow({
             </p>
           )}
           {!resolving && resolveError !== '' && !untrustedResolve && (
-            // Rule 4, every other failure: plain error + retry, since these
-            // ARE plausibly transient (network, no cache configured, …).
+            // Rule 4, every other failure: the error always renders, but the
+            // 重试 button only where a fetch could work at all (`fetchable`).
+            // A transient fetch failure — a refused connection, a timeout, a
+            // 5xx from the origin — really is worth retrying. A row that is
+            // not fetchable in the first place is not: retrying a deployment
+            // with no plugins.cache, or a package that will not load, fails
+            // identically forever. (The old comment here claimed "no cache
+            // configured" was "plausibly transient"; a deployment
+            // configuration fact is the least transient thing there is.)
             <div className="flex flex-col gap-1">
               <p className="text-xs text-destructive break-all">取回声明失败：{resolveError}</p>
-              <div>
-                <button
-                  type="button"
-                  className="interactive text-xs px-2 py-1 rounded border border-input hover:bg-muted text-muted-foreground"
-                  onClick={onResolve}
-                >
-                  重试
-                </button>
-              </div>
+              {fetchable && (
+                <div>
+                  <button
+                    type="button"
+                    className="interactive text-xs px-2 py-1 rounded border border-input hover:bg-muted text-muted-foreground"
+                    onClick={onResolve}
+                  >
+                    重试
+                  </button>
+                </div>
+              )}
             </div>
           )}
-          {!resolving && resolveError === '' && effectivePlugin.declared_unresolved && (
+          {!resolving && resolveError === '' && fetchable && (
             <div>
               {/* Rule 1: secondary styling — fetching is not the goal,
-                  authorizing is. */}
+                  authorizing is. Gated on `fetchable`, not on
+                  declared_unresolved: see that constant's comment. */}
               <button
                 type="button"
                 className="interactive text-xs px-2 py-1 rounded border border-input hover:bg-muted text-muted-foreground"

@@ -38,6 +38,7 @@ export namespace main {
 	    declared_allowed_hosts: string[];
 	    declared_allowed_paths: string[];
 	    declared_unresolved: boolean;
+	    declared_unresolved_reason?: string;
 	    declared_error?: string;
 	    granted_capabilities: string[];
 	    granted_allowed_hosts: string[];
@@ -60,6 +61,7 @@ export namespace main {
 	        this.declared_allowed_hosts = source["declared_allowed_hosts"];
 	        this.declared_allowed_paths = source["declared_allowed_paths"];
 	        this.declared_unresolved = source["declared_unresolved"];
+	        this.declared_unresolved_reason = source["declared_unresolved_reason"];
 	        this.declared_error = source["declared_error"];
 	        this.granted_capabilities = source["granted_capabilities"];
 	        this.granted_allowed_hosts = source["granted_allowed_hosts"];
@@ -108,6 +110,7 @@ export namespace main {
 	    declared_allowed_hosts: string[];
 	    declared_allowed_paths: string[];
 	    declared_unresolved: boolean;
+	    declared_unresolved_reason?: string;
 	    declared_error?: string;
 	    granted_capabilities: string[];
 	    granted_allowed_hosts: string[];
@@ -128,6 +131,7 @@ export namespace main {
 	        this.declared_allowed_hosts = source["declared_allowed_hosts"];
 	        this.declared_allowed_paths = source["declared_allowed_paths"];
 	        this.declared_unresolved = source["declared_unresolved"];
+	        this.declared_unresolved_reason = source["declared_unresolved_reason"];
 	        this.declared_error = source["declared_error"];
 	        this.granted_capabilities = source["granted_capabilities"];
 	        this.granted_allowed_hosts = source["granted_allowed_hosts"];

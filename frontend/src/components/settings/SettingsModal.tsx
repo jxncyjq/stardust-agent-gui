@@ -62,6 +62,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   // (PluginsPage.tsx) has no overlay of its own the way PluginConsentDialog's
   // submitting phase does, so without this the backdrop/X are reachable and
   // would silently unmount the panel out from under a real in-flight request.
+  // The 配置/插件 tab buttons are gated on it too: they do not reach onClose,
+  // but they unmount PluginsPage just the same, which is the damage the guard
+  // is actually about.
   const consentInFlight = usePluginConsentStore((s) => s.inFlight > 0)
 
   useEffect(() => {
@@ -124,16 +127,29 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           </div>
           <div className="flex items-center gap-2">
             {!editingAgent && (
+              // The tab buttons are gated on consentInFlight for the same
+              // reason Escape / the backdrop / the X are, even though they do
+              // not close the modal: switching tabs UNMOUNTS PluginsPage,
+              // which is where `resolved`, `resolveError` and the consent
+              // dialog live, so it discards the result of the request the
+              // operator is waiting on. PluginConsentDialog's own submit is
+              // covered by its fixed inset-0 z-[70] overlay, but
+              // retryConvergence and resolveDeclaration have no overlay at
+              // all — these were the last two clickable doors into that.
               <div className="flex items-center gap-1">
                 <button
-                  className={`interactive text-xs px-2 py-1 rounded ${!pluginsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                  className={`interactive text-xs px-2 py-1 rounded disabled:opacity-50 disabled:hover:bg-transparent ${!pluginsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                   onClick={closePlugins}
+                  disabled={consentInFlight}
+                  title={consentInFlight ? '插件授权正在收敛，暂时无法切换' : undefined}
                 >
                   配置
                 </button>
                 <button
-                  className={`interactive text-xs px-2 py-1 rounded ${pluginsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                  className={`interactive text-xs px-2 py-1 rounded disabled:opacity-50 disabled:hover:bg-transparent ${pluginsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
                   onClick={openPlugins}
+                  disabled={consentInFlight}
+                  title={consentInFlight ? '插件授权正在收敛，暂时无法切换' : undefined}
                 >
                   插件
                 </button>

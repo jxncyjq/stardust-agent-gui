@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -280,6 +282,38 @@ func TestResolvePluginMarksA422AsUntrusted(t *testing.T) {
 	}
 	if !errors.Is(err, errPluginUntrusted) {
 		t.Errorf("ResolvePlugin error = %v, want it to wrap errPluginUntrusted", err)
+	}
+}
+
+// TestErrPluginUntrustedMessageIsTheContractTheGUIMatches is I-2 of the
+// whole-branch final review.
+//
+// The React panel identifies the untrusted class by matching this exact
+// message text (UNTRUSTED_MARKER in
+// frontend/src/components/settings/PluginsPage.tsx) — this repo configures no
+// Wails ErrorFormatter, so the message string is the ONLY thing that crosses
+// the binding boundary. Nothing else would catch a rename:
+// TestResolvePluginMarksA422AsUntrusted asserts sentinel IDENTITY via
+// errors.Is and is immune to the text, and the vitest mocks its own hardcoded
+// copy of the string, so both suites stay green while production breaks in
+// the worst direction — an untrusted package re-offered with a 重试 button.
+//
+// If this test fails you renamed the message: update UNTRUSTED_MARKER in
+// PluginsPage.tsx (and its vitest) in the SAME commit, then update the
+// literal below.
+func TestErrPluginUntrustedMessageIsTheContractTheGUIMatches(t *testing.T) {
+	const wantMarker = "插件包不被信任"
+	if got := errPluginUntrusted.Error(); got != wantMarker {
+		t.Fatalf("errPluginUntrusted.Error() = %q, want %q; frontend/src/components/settings/PluginsPage.tsx's "+
+			"UNTRUSTED_MARKER matches this literal to decide whether to offer a retry, and no compiler checks it",
+			got, wantMarker)
+	}
+	// The wrapped error a 422 produces must still CONTAIN the marker: the
+	// panel matches against the whole rendered chain, not against the
+	// sentinel alone.
+	wrapped := fmt.Errorf("resolve plugin %q: %w: %w", "weather", errPluginUntrusted, errors.New("422"))
+	if !strings.Contains(wrapped.Error(), wantMarker) {
+		t.Errorf("wrapped resolve error = %q, want it to contain %q", wrapped.Error(), wantMarker)
 	}
 }
 
