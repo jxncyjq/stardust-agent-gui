@@ -31,20 +31,30 @@ import (
 // not-yet-fetched state, not a failure). Mirrors legionAgent's
 // internal/server/plugins.go PluginView.DeclaredError field-for-field; see
 // its doc comment for the full case breakdown.
+//
+// DeclaredUnresolvedReason says WHICH situation set DeclaredUnresolved, and
+// the panel keys its 取回声明 (fetch) button on it rather than on the bare
+// boolean: a remote package merely not cached yet IS fetchable, while a
+// deployment with no plugins.cache configured, and a package that fails to
+// load, are not — offering a fetch on those is a control that can never
+// work. Mirrors legionAgent's internal/server/plugins.go
+// PluginView.DeclaredUnresolvedReason field-for-field; the values it can
+// take are that package's DeclaredUnresolved* constants.
 type PluginDTO struct {
-	Name                 string   `json:"name"`
-	Version              string   `json:"version"`
-	State                string   `json:"state"`
-	Detail               string   `json:"detail,omitempty"`
-	Tools                []string `json:"tools"`
-	DeclaredCapabilities []string `json:"declared_capabilities"`
-	DeclaredAllowedHosts []string `json:"declared_allowed_hosts"`
-	DeclaredAllowedPaths []string `json:"declared_allowed_paths"`
-	DeclaredUnresolved   bool     `json:"declared_unresolved"`
-	DeclaredError        string   `json:"declared_error,omitempty"`
-	GrantedCapabilities  []string `json:"granted_capabilities"`
-	GrantedAllowedHosts  []string `json:"granted_allowed_hosts"`
-	GrantedAllowedPaths  []string `json:"granted_allowed_paths"`
+	Name                     string   `json:"name"`
+	Version                  string   `json:"version"`
+	State                    string   `json:"state"`
+	Detail                   string   `json:"detail,omitempty"`
+	Tools                    []string `json:"tools"`
+	DeclaredCapabilities     []string `json:"declared_capabilities"`
+	DeclaredAllowedHosts     []string `json:"declared_allowed_hosts"`
+	DeclaredAllowedPaths     []string `json:"declared_allowed_paths"`
+	DeclaredUnresolved       bool     `json:"declared_unresolved"`
+	DeclaredUnresolvedReason string   `json:"declared_unresolved_reason,omitempty"`
+	DeclaredError            string   `json:"declared_error,omitempty"`
+	GrantedCapabilities      []string `json:"granted_capabilities"`
+	GrantedAllowedHosts      []string `json:"granted_allowed_hosts"`
+	GrantedAllowedPaths      []string `json:"granted_allowed_paths"`
 }
 
 // ConsentResultDTO is the response body of GrantPlugin/DenyPlugin: the
@@ -119,6 +129,19 @@ func (a *App) pluginsGet(path string) ([]byte, error) {
 	return body, nil
 }
 
+// httpStatusError wraps a non-2xx response from pluginsPost with the numeric
+// HTTP status, so a caller that must branch on one specific status (like
+// ResolvePlugin distinguishing 422 from every other failure) can use
+// errors.As instead of parsing the status back out of an error string.
+type httpStatusError struct {
+	status int
+	err    error
+}
+
+func (e *httpStatusError) Error() string { return e.err.Error() }
+
+func (e *httpStatusError) Unwrap() error { return e.err }
+
 // pluginsPost performs an authenticated POST against the embedded serve and
 // returns the response body, failing loud on any non-2xx status. body is
 // marshalled as the JSON request body when non-nil, or sent as an empty body
@@ -154,7 +177,10 @@ func (a *App) pluginsPost(path string, body any) ([]byte, error) {
 		return nil, fmt.Errorf("read response from %s: %w", path, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("post %s failed: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respBody)))
+		return nil, &httpStatusError{
+			status: resp.StatusCode,
+			err:    fmt.Errorf("post %s failed: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respBody))),
+		}
 	}
 	return respBody, nil
 }
@@ -226,6 +252,62 @@ func (a *App) DenyPlugin(name string) (ConsentResultDTO, error) {
 	var result ConsentResultDTO
 	if err := json.Unmarshal(body, &result); err != nil {
 		return ConsentResultDTO{}, fmt.Errorf("decode deny response for plugin %q: %w", name, err)
+	}
+	return result, nil
+}
+
+// errPluginUntrusted marks a 422 from the resolve endpoint: the package was
+// obtained but is not trustworthy (unsigned, corruptly signed, or signed by
+// an untrusted key). The settings panel must not offer a retry for it —
+// retrying cannot make an untrusted package trusted, and a control that can
+// never work is the class of lie this panel exists to avoid.
+//
+// ITS MESSAGE TEXT IS A CROSS-LANGUAGE CONTRACT. CHANGING THE STRING IS A
+// BREAKING CHANGE. This repo configures no Wails ErrorFormatter, so a
+// binding's error crosses to JS as nothing but this error chain's Error()
+// string — no status code, no type, no structured payload survives. The
+// panel therefore identifies the untrusted class by matching this exact
+// text: see UNTRUSTED_MARKER in
+// frontend/src/components/settings/PluginsPage.tsx, whose own comment
+// explains why substring matching is the only mechanism available there.
+// Rewording this message without editing UNTRUSTED_MARKER in the same commit
+// silently turns the no-retry alert back into a retry button — a trust
+// verdict presented as a transient failure — with no compile error on either
+// side. TestErrPluginUntrustedMessageIsTheContractTheGUIMatches pins the
+// literal so a rename fails loudly here instead.
+var errPluginUntrusted = errors.New("插件包不被信任")
+
+// ResolvePlugin fetches and verifies one plugin's package so the panel can
+// show what it declares, without authorizing anything, via
+// POST /v1/plugins/{name}/resolve. On success the response decodes into the
+// same PluginDTO shape GET /v1/plugins returns per element, including
+// DeclaredUnresolved and DeclaredError.
+//
+// A non-2xx status is always returned as an error, never a zero-value
+// PluginDTO with a nil error. A 422 specifically means the package was
+// obtained but could not be trusted (unsigned, corruptly signed, or signed
+// by an untrusted key); that case is additionally wrapped with
+// errPluginUntrusted so the caller can distinguish "will never succeed by
+// retrying" from every other failure (404 unknown plugin or no plugin
+// loader assembled, 409 concurrent manifest edit, 500 storage failure, 503
+// unavailable, 403 RBAC denial) via errors.Is. Called by React via the
+// Wails bindings.
+func (a *App) ResolvePlugin(name string) (PluginDTO, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return PluginDTO{}, fmt.Errorf("plugin name is required")
+	}
+	body, err := a.pluginsPost("/v1/plugins/"+name+"/resolve", nil)
+	if err != nil {
+		var statusErr *httpStatusError
+		if errors.As(err, &statusErr) && statusErr.status == http.StatusUnprocessableEntity {
+			return PluginDTO{}, fmt.Errorf("resolve plugin %q: %w: %w", name, errPluginUntrusted, err)
+		}
+		return PluginDTO{}, fmt.Errorf("resolve plugin %q: %w", name, err)
+	}
+	var result PluginDTO
+	if err := json.Unmarshal(body, &result); err != nil {
+		return PluginDTO{}, fmt.Errorf("decode resolve response for plugin %q: %w", name, err)
 	}
 	return result, nil
 }

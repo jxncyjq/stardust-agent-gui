@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -241,6 +243,98 @@ func TestDenyPluginValidatesName(t *testing.T) {
 	}
 }
 
+// TestResolvePluginDecodesTheView verifies a normal 200 from the resolve
+// endpoint decodes into the same PluginDTO shape GET /v1/plugins uses.
+func TestResolvePluginDecodesTheView(t *testing.T) {
+	a := newFakeBackendApp(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/plugins/weather/resolve" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"name":"weather","version":"1.0.0","state":"unauthorized","tools":[],"declared_capabilities":["http"],"declared_allowed_hosts":[],"declared_allowed_paths":[],"declared_unresolved":false,"granted_capabilities":[],"granted_allowed_hosts":[],"granted_allowed_paths":[]}`))
+	})
+
+	view, err := a.ResolvePlugin("weather")
+	if err != nil {
+		t.Fatalf("ResolvePlugin: %v", err)
+	}
+	if view.DeclaredUnresolved {
+		t.Error("DeclaredUnresolved = true after a successful resolve, want false")
+	}
+	if len(view.DeclaredCapabilities) != 1 || view.DeclaredCapabilities[0] != "http" {
+		t.Errorf("DeclaredCapabilities = %v, want [http]", view.DeclaredCapabilities)
+	}
+}
+
+// TestResolvePluginMarksA422AsUntrusted verifies a 422 (package obtained but
+// not trustworthy) is classified via errPluginUntrusted, so the panel can
+// tell "not trustworthy" apart from every other failure and offer no retry.
+func TestResolvePluginMarksA422AsUntrusted(t *testing.T) {
+	a := newFakeBackendApp(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		w.Write([]byte(`{"error":"resolve plugin \"weather\": plugin package is not trusted"}`))
+	})
+
+	_, err := a.ResolvePlugin("weather")
+	if err == nil {
+		t.Fatal("ResolvePlugin on a 422 = nil error, want an untrusted-package error")
+	}
+	if !errors.Is(err, errPluginUntrusted) {
+		t.Errorf("ResolvePlugin error = %v, want it to wrap errPluginUntrusted", err)
+	}
+}
+
+// TestErrPluginUntrustedMessageIsTheContractTheGUIMatches is I-2 of the
+// whole-branch final review.
+//
+// The React panel identifies the untrusted class by matching this exact
+// message text (UNTRUSTED_MARKER in
+// frontend/src/components/settings/PluginsPage.tsx) — this repo configures no
+// Wails ErrorFormatter, so the message string is the ONLY thing that crosses
+// the binding boundary. Nothing else would catch a rename:
+// TestResolvePluginMarksA422AsUntrusted asserts sentinel IDENTITY via
+// errors.Is and is immune to the text, and the vitest mocks its own hardcoded
+// copy of the string, so both suites stay green while production breaks in
+// the worst direction — an untrusted package re-offered with a 重试 button.
+//
+// If this test fails you renamed the message: update UNTRUSTED_MARKER in
+// PluginsPage.tsx (and its vitest) in the SAME commit, then update the
+// literal below.
+func TestErrPluginUntrustedMessageIsTheContractTheGUIMatches(t *testing.T) {
+	const wantMarker = "插件包不被信任"
+	if got := errPluginUntrusted.Error(); got != wantMarker {
+		t.Fatalf("errPluginUntrusted.Error() = %q, want %q; frontend/src/components/settings/PluginsPage.tsx's "+
+			"UNTRUSTED_MARKER matches this literal to decide whether to offer a retry, and no compiler checks it",
+			got, wantMarker)
+	}
+	// The wrapped error a 422 produces must still CONTAIN the marker: the
+	// panel matches against the whole rendered chain, not against the
+	// sentinel alone.
+	wrapped := fmt.Errorf("resolve plugin %q: %w: %w", "weather", errPluginUntrusted, errors.New("422"))
+	if !strings.Contains(wrapped.Error(), wantMarker) {
+		t.Errorf("wrapped resolve error = %q, want it to contain %q", wrapped.Error(), wantMarker)
+	}
+}
+
+// TestResolvePluginFailsLoudOnOtherNon2xx verifies a 500 is NOT classified as
+// untrusted: only 422 means "cannot be trusted", every other failure is an
+// ordinary transient/operational error.
+func TestResolvePluginFailsLoudOnOtherNon2xx(t *testing.T) {
+	a := newFakeBackendApp(t, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"resolve plugin \"weather\": disk on fire"}`))
+	})
+
+	_, err := a.ResolvePlugin("weather")
+	if err == nil {
+		t.Fatal("ResolvePlugin on a 500 = nil error, want an error")
+	}
+	if errors.Is(err, errPluginUntrusted) {
+		t.Errorf("ResolvePlugin error = %v, want a 500 NOT classified as untrusted", err)
+	}
+}
+
 // TestPluginBindingsFailLoudBeforeServeHasAPort pins the not-ready guard.
 //
 // Caught on a real machine: opening the plugin tab immediately after launch,
@@ -271,5 +365,11 @@ func TestPluginBindingsFailLoudBeforeServeHasAPort(t *testing.T) {
 		t.Fatal("DenyPlugin with no serve port = nil error, want a not-ready error")
 	} else if !errors.Is(err, errServeNotReady) {
 		t.Errorf("DenyPlugin error = %v, want it to wrap errServeNotReady", err)
+	}
+
+	if _, err := a.ResolvePlugin("any"); err == nil {
+		t.Fatal("ResolvePlugin with no serve port = nil error, want a not-ready error")
+	} else if !errors.Is(err, errServeNotReady) {
+		t.Errorf("ResolvePlugin error = %v, want it to wrap errServeNotReady", err)
 	}
 }

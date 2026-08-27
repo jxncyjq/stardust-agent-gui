@@ -80,6 +80,8 @@ export function RenameProject(arg1:string,arg2:string):Promise<void>;
 
 export function RenameSession(arg1:string,arg2:string):Promise<void>;
 
+export function ResolvePlugin(arg1:string):Promise<main.PluginDTO>;
+
 export function RevealInExplorer(arg1:string):Promise<void>;
 
 export function SaveAll(arg1:string,arg2:Record<string, string>):Promise<void>;
