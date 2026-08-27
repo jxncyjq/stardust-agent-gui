@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -71,7 +72,31 @@ type ConsentResultDTO struct {
 // same reason apiGet/browserPost do: ServeManager.Restart rebinds the
 // embedded serve on a new port and mints a fresh bearer token, so a value
 // captured earlier would silently 403 or dial a dead port after a restart.
+
+// errServeNotReady is what the plugin bindings report when the embedded serve
+// has not bound a port yet. BaseURL() formats whatever Port() returns, so
+// before the listener exists it yields "http://127.0.0.1:0" — a syntactically
+// fine URL that can never connect. Dialling it surfaced
+// "dial tcp 127.0.0.1:0: connectex: The requested address is not valid in its
+// context" in the settings panel, which tells an operator nothing about what
+// actually happened. Caught on a real machine by opening the plugin tab
+// immediately after launch, before the serve had finished starting.
+var errServeNotReady = errors.New("内嵌服务尚未就绪（端口未分配），请稍候重试")
+
+// requireServePort fails loud when the embedded serve has no port yet, instead
+// of letting a caller dial port 0 and report a transport error for what is
+// really a not-started-yet condition.
+func (a *App) requireServePort() error {
+	if a.serve.Port() == 0 {
+		return errServeNotReady
+	}
+	return nil
+}
+
 func (a *App) pluginsGet(path string) ([]byte, error) {
+	if err := a.requireServePort(); err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequest(http.MethodGet, a.BaseURL()+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request for %s: %w", path, err)
@@ -100,6 +125,9 @@ func (a *App) pluginsGet(path string) ([]byte, error) {
 // when nil (the deny endpoint takes no body). Token/BaseURL are read per call
 // for the same restart-safety reason as pluginsGet.
 func (a *App) pluginsPost(path string, body any) ([]byte, error) {
+	if err := a.requireServePort(); err != nil {
+		return nil, err
+	}
 	var reader io.Reader
 	if body != nil {
 		payload, err := json.Marshal(body)
