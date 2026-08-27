@@ -235,6 +235,34 @@ describe('PluginConsentDialog — convergence_detail on the converged branch is 
     expect(screen.getByText(/plugin-b failed to activate/)).toBeInTheDocument()
   })
 
+  it('offers no retry once the grant has taken effect', async () => {
+    // Caught on a real machine: the footer rendered 重试 unconditionally, so a
+    // grant that had already converged showed "已生效" above a primary-styled
+    // 重试 — the loudest control there, inviting the operator to redo work that
+    // had succeeded. Retry belongs to the failure footer; after a successful
+    // convergence the only action left is to close.
+    mocks.GrantPlugin.mockResolvedValue(
+      main.ConsentResultDTO.createFrom({
+        name: 'sample-plugin',
+        state: 'loaded',
+        pending_convergence: false,
+        granted_capabilities: [],
+        granted_allowed_hosts: [],
+        granted_allowed_paths: [],
+        tools: ['echo_tool'],
+      }),
+    )
+    const plugin = makePlugin({ declared_capabilities: [] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '确认并授权' }))
+
+    await screen.findByText('已生效')
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '返回修改' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '关闭' })).toBeInTheDocument()
+  })
+
   it('renders convergence_detail alongside the failed-load detail (pending_convergence false, state failed)', async () => {
     mocks.GrantPlugin.mockResolvedValue(
       main.ConsentResultDTO.createFrom({

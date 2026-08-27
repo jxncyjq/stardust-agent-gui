@@ -350,21 +350,29 @@ export function PluginConsentDialog({ plugin, mode, onClose, onResult }: PluginC
               关闭
             </button>
             {error && (
-              <button
-                type="button"
-                className="interactive text-xs px-3 py-1 rounded hover:bg-muted text-muted-foreground"
-                onClick={backToForm}
-              >
-                返回修改
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="interactive text-xs px-3 py-1 rounded hover:bg-muted text-muted-foreground"
+                  onClick={backToForm}
+                >
+                  返回修改
+                </button>
+                {/* Retry belongs to the FAILURE footer only. It used to render
+                    unconditionally here, so a grant that had already taken
+                    effect showed "已生效" above a primary-styled 重试 — the
+                    loudest control in the footer inviting the operator to redo
+                    work that succeeded. A successful convergence has nothing to
+                    retry; the only action left is to close. */}
+                <button
+                  type="button"
+                  className="interactive text-xs px-3 py-1 rounded bg-primary text-primary-foreground hover:opacity-90"
+                  onClick={submit}
+                >
+                  重试
+                </button>
+              </>
             )}
-            <button
-              type="button"
-              className="interactive text-xs px-3 py-1 rounded bg-primary text-primary-foreground hover:opacity-90"
-              onClick={submit}
-            >
-              重试
-            </button>
           </div>
         )}
       </div>
