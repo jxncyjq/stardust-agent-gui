@@ -332,4 +332,10 @@ func TestPluginBindingsFailLoudBeforeServeHasAPort(t *testing.T) {
 	} else if !errors.Is(err, errServeNotReady) {
 		t.Errorf("DenyPlugin error = %v, want it to wrap errServeNotReady", err)
 	}
+
+	if _, err := a.ResolvePlugin("any"); err == nil {
+		t.Fatal("ResolvePlugin with no serve port = nil error, want a not-ready error")
+	} else if !errors.Is(err, errServeNotReady) {
+		t.Errorf("ResolvePlugin error = %v, want it to wrap errServeNotReady", err)
+	}
 }
