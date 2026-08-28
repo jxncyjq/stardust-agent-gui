@@ -92,6 +92,48 @@ function unresolvedNote(reason: string): string {
   }
 }
 
+// ErrorDetail renders a failure as a HUMAN SENTENCE with the raw error chain
+// folded behind a disclosure.
+//
+// The chain is not decoration and is never dropped: a Go error crossing the
+// Wails boundary arrives as ONE FLAT STRING carrying every wrapper it picked
+// up — HTTP status line, JSON response body, the escaped absolute cache path
+// — and an operator diagnosing a supply-chain problem needs all of it. What
+// the 2026-08-28 real-machine walkthrough showed is that putting it INSIDE
+// the sentence buries the finding it is supposed to deliver: 633 characters
+// in a single <p>, with 「该插件包未通过信任校验」 somewhere in the middle.
+// So the sentence stands alone and the chain moves one click away.
+//
+// The disclosure is a native <details>, which keeps the chain in the DOM
+// (searchable, selectable, copyable) rather than behind React state that
+// would have to be cleared alongside the error it belongs to.
+function ErrorDetail({
+  summary,
+  detail,
+  summaryClass,
+  role,
+}: {
+  summary: string
+  detail: string
+  summaryClass: string
+  // role is set only where the failure is an ALERT — a trust failure the
+  // operator must not miss. It goes on the sentence, not on the wrapper, so
+  // an assistive reader announces the finding and not the error chain.
+  role?: 'alert'
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <p className={summaryClass} role={role}>
+        {summary}
+      </p>
+      <details className="text-[10px] text-muted-foreground">
+        <summary className="interactive cursor-pointer select-none">显示详细错误</summary>
+        <pre className="whitespace-pre-wrap break-all mt-0.5">{detail}</pre>
+      </details>
+    </div>
+  )
+}
+
 // ConsentOverride is what a completed Grant/Deny call leaves behind for one
 // plugin row, so the row can render the fresh outcome immediately instead of
 // waiting on a manual refresh (ListPlugins carries no push/SSE channel).
@@ -127,6 +169,39 @@ function denyDialogView(plugin: main.PluginDTO, override?: ConsentOverride): mai
     granted_allowed_hosts: override.result.granted_allowed_hosts,
     granted_allowed_paths: override.result.granted_allowed_paths,
   })
+}
+
+// reconcileResolved drops every fetched-declaration view the server no longer
+// corroborates, and keeps the rest.
+//
+// `resolved` is a claim about the SERVER'S DISK ("已取回并缓存该插件包"), not
+// a fact about this session, and the server is the one that knows. A fresh
+// List that reports the row unresolved again — the cache entry deleted by an
+// operator, a disk cleanup, a digest edit in plugins.json that points at a
+// package nobody has fetched — makes the claim false. Keeping it there was
+// the 2026-08-28 walkthrough's worst finding: the panel went on asserting the
+// package was cached AND, because the stale view shadowed the fresh row, it
+// withheld 取回声明 — the one control that could have fixed it. Only an app
+// restart cleared it.
+//
+// The reverse over-correction is just as wrong, which is why this is a filter
+// and not a wipe: dropping a fetch the server still agrees with would make
+// the operator pay the download cost again on every 刷新, the very thing
+// `resolved` survives a refresh to prevent. A row absent from the fresh list
+// is dropped too — there is nothing left to make a claim about.
+function reconcileResolved(
+  resolved: Record<string, main.PluginDTO>,
+  fresh: main.PluginDTO[],
+): Record<string, main.PluginDTO> {
+  const next: Record<string, main.PluginDTO> = {}
+  for (const plugin of fresh) {
+    const view = resolved[plugin.name]
+    if (!view) continue
+    if (plugin.declared_unresolved) continue
+    if ((plugin.declared_error ?? '') !== '') continue
+    next[plugin.name] = view
+  }
+  return next
 }
 
 // STATE_LABELS/STATE_BADGE_CLASS cover every state internal/cli's
@@ -181,23 +256,41 @@ export function PluginsPage() {
   const [retryError, setRetryError] = useState<Record<string, string>>({})
   const [resolving, setResolving] = useState<Record<string, boolean>>({})
   const [resolveError, setResolveError] = useState<Record<string, string>>({})
-  // resolved holds the successful ResolvePlugin() view per plugin name. It is
-  // deliberately NOT cleared by load(): fetching does not write plugins.json
-  // (Rule 2 in the brief this implements), so a manual refresh must not make
-  // the operator lose a fetch they already paid the download cost for, or
-  // "已取回并缓存该插件包" would stop being true the moment they clicked 刷新.
+  // resolved holds the successful ResolvePlugin() view per plugin name. load()
+  // does not WIPE it — fetching does not write plugins.json (Rule 2 in the
+  // brief this implements), so a manual refresh must not make the operator
+  // lose a fetch they already paid the download cost for — but it does
+  // RECONCILE it against the fresh list: see reconcileResolved for why a
+  // survival rule with no reconciliation turned into a false claim the panel
+  // could not be talked out of.
   const [resolved, setResolved] = useState<Record<string, main.PluginDTO>>({})
 
-  // load fetches the authoritative list from the server and clears every
-  // override: a fresh List() result is the truth this page defers to, and
-  // holding onto a stale override past a manual refresh would be exactly
-  // the kind of quiet drift fail-loud exists to avoid.
+  // load fetches the authoritative list from the server and drops every piece
+  // of client-side state the fresh result supersedes: a List() result is the
+  // truth this page defers to, and holding stale client state past a manual
+  // refresh is exactly the kind of quiet drift fail-loud exists to avoid.
+  //
+  // That means all four, not just the override it originally cleared:
+  //
+  //   overrides     — a completed grant/deny the list has now absorbed.
+  //   retryError    — keyed by plugin name and gated on an override that
+  //                   load() clears, so a stale one goes INVISIBLE here and
+  //                   resurfaces on the next pending convergence, pinning an
+  //                   old failure on a request that has not failed.
+  //   resolveError  — a 422 caches the untrusted package, so the very next
+  //                   List reports that same failure server-side; keeping the
+  //                   client-side copy renders one signature failure twice.
+  //   resolved      — reconciled, not cleared (see reconcileResolved).
   async function load() {
     try {
       const result = await ListPlugins()
-      setPlugins(result ?? [])
+      const fresh = result ?? []
+      setPlugins(fresh)
       setLoadError('')
       setOverrides({})
+      setRetryError({})
+      setResolveError({})
+      setResolved((prev) => reconcileResolved(prev, fresh))
     } catch (err) {
       // Surfaced, not swallowed: a failed list call must not read as "no
       // plugins installed".
@@ -429,7 +522,12 @@ function PluginRow({
           {override?.result.convergence_detail && (
             <p className="text-xs text-muted-foreground break-all">{override.result.convergence_detail}</p>
           )}
-          {retryError && <p className="text-xs text-destructive break-all">重试失败：{retryError}</p>}
+          {retryError && (
+            // Same treatment as the fetch failures below: a convergence error
+            // is another flat Go chain, and the sentence must not be buried
+            // in it.
+            <ErrorDetail summary="重试失败。" detail={retryError} summaryClass="text-xs text-destructive" />
+          )}
           <div>
             <button
               type="button"
@@ -465,7 +563,11 @@ function PluginRow({
             // load_failed reason (the server always sets declared_error with
             // it), and `fetchable` is false throughout it: re-fetching reads
             // the same broken bytes forever.
-            <p className="text-xs text-destructive break-all">插件声明解析失败：{effectivePlugin.declared_error}</p>
+            <ErrorDetail
+              summary="插件声明解析失败。"
+              detail={effectivePlugin.declared_error}
+              summaryClass="text-xs text-destructive"
+            />
           ) : (
             effectivePlugin.declared_unresolved && (
               // Distinct from "this plugin requests nothing" on purpose —
@@ -508,9 +610,12 @@ function PluginRow({
             // Retrying can never make an untrusted package trusted — a
             // control that cannot work is the same class of lie a cancel
             // button that cancels nothing would be.
-            <p className="text-xs font-semibold text-destructive break-all" role="alert">
-              该插件包未通过信任校验，重试无法解决此问题，请联系插件包的提供方：{resolveError}
-            </p>
+            <ErrorDetail
+              summary="该插件包未通过信任校验，重试无法解决此问题，请联系插件包的提供方。"
+              detail={resolveError}
+              summaryClass="text-xs font-semibold text-destructive"
+              role="alert"
+            />
           )}
           {!resolving && resolveError !== '' && !untrustedResolve && (
             // Rule 4, every other failure: the error always renders, but the
@@ -523,7 +628,7 @@ function PluginRow({
             // configured" was "plausibly transient"; a deployment
             // configuration fact is the least transient thing there is.)
             <div className="flex flex-col gap-1">
-              <p className="text-xs text-destructive break-all">取回声明失败：{resolveError}</p>
+              <ErrorDetail summary="取回声明失败。" detail={resolveError} summaryClass="text-xs text-destructive" />
               {fetchable && (
                 <div>
                   <button

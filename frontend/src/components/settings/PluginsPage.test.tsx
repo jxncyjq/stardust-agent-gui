@@ -635,3 +635,209 @@ describe('PluginsPage — I-4: 取回声明 is offered only where a fetch can wo
     expect(within(row).queryByRole('button', { name: '取回声明' })).not.toBeInTheDocument()
   })
 })
+
+// 2026-08-28 真机走查（docs/superpowers/2026-08-28-gui-plugin-walkthrough.md）
+// 抓到的三个缺陷，全部是「断言了该出现的出现了，没人数不该出现的」这一类：
+//
+//  F1 不可信告警把整条原始错误链（HTTP 状态行 + JSON 包体 + 四层转义的
+//     绝对路径，633 字符）塞进同一个 <p>，人要读的那句被埋在中间。
+//  F2 load() 只清 overrides，不清 resolveError/retryError，于是刷新之后
+//     同一个失败由服务端和客户端各讲一遍。
+//  F3 `resolved` 遮蔽服务端真相且永不清除。缓存条目从磁盘消失后，界面
+//     仍宣称「已取回并缓存」，并且收走了唯一能修正它的「取回声明」按钮。
+describe('PluginsPage — 真机走查抓到的缺陷', () => {
+  const UNTRUSTED_CHAIN =
+    'resolve plugin "plugin-t": 插件包不被信任: post /v1/plugins/plugin-t/resolve failed: ' +
+    'status 422: {"error":"resolve plugin \\"plugin-t\\": plugin package is not trusted: ' +
+    'verify signature: signature does not verify against key \\"demo-key\\""}'
+
+  function uncachedRow(name: string) {
+    return makePlugin({
+      name,
+      state: 'unauthorized',
+      declared_unresolved: true,
+      declared_unresolved_reason: 'not_cached',
+    })
+  }
+
+  function resolvedView(name: string) {
+    return main.PluginDTO.createFrom({
+      name,
+      state: 'unauthorized',
+      declared_capabilities: ['log'],
+      declared_allowed_hosts: [],
+      declared_allowed_paths: [],
+      declared_unresolved: false,
+      granted_capabilities: [],
+      granted_allowed_hosts: [],
+      granted_allowed_paths: [],
+      tools: [],
+    })
+  }
+
+  it('F3: a refresh that reports the package uncached again drops the cache note and restores 取回声明', async () => {
+    // The fetched view is not a fact about this session, it is a claim about
+    // the SERVER'S DISK — and the server is the one that knows. Deleting the
+    // cache entry (an operator clearing the cache dir, a disk cleanup) makes
+    // "已取回并缓存该插件包" false, and until this fix a 刷新 could not
+    // correct it: `resolved` shadowed the fresh row, so the panel kept
+    // asserting the package was cached AND withheld the one control that
+    // could fix it. Only restarting the app cleared it.
+    mocks.ListPlugins.mockResolvedValue([uncachedRow('plugin-g')])
+    mocks.ResolvePlugin.mockResolvedValue(resolvedView('plugin-g'))
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 plugin-g' })
+    fireEvent.click(within(row).getByRole('button', { name: '取回声明' }))
+    await screen.findByText(/已取回并缓存该插件包/)
+
+    // The package is gone from the cache again; the next List says so.
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+
+    await waitFor(() => {
+      const refreshed = screen.getByRole('group', { name: '插件 plugin-g' })
+      expect(within(refreshed).queryByText(/已取回并缓存该插件包/)).not.toBeInTheDocument()
+    })
+    const refreshed = screen.getByRole('group', { name: '插件 plugin-g' })
+    expect(within(refreshed).getByRole('button', { name: '取回声明' })).toBeInTheDocument()
+    expect(within(refreshed).getByRole('button', { name: '授权' })).toBeDisabled()
+  })
+
+  it('F3: a refresh that still agrees the package is resolved keeps the cache note', async () => {
+    // The other half of the rule: reconciling must not throw away a fetch the
+    // server still corroborates, or the operator loses a download they paid
+    // for every time they click 刷新 — the very thing `resolved` survives a
+    // refresh to prevent.
+    mocks.ListPlugins.mockResolvedValueOnce([uncachedRow('plugin-k')]).mockResolvedValue([
+      makePlugin({ name: 'plugin-k', state: 'unauthorized', declared_capabilities: ['log'] }),
+    ])
+    mocks.ResolvePlugin.mockResolvedValue(resolvedView('plugin-k'))
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 plugin-k' })
+    fireEvent.click(within(row).getByRole('button', { name: '取回声明' }))
+    await screen.findByText(/已取回并缓存该插件包/)
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+
+    await waitFor(() => expect(mocks.ListPlugins).toHaveBeenCalledTimes(2))
+    const refreshed = screen.getByRole('group', { name: '插件 plugin-k' })
+    expect(within(refreshed).getByText(/已取回并缓存该插件包/)).toBeInTheDocument()
+  })
+
+  it('F2: a refresh clears the client-side fetch failure instead of doubling the server report', async () => {
+    // A 422 caches the untrusted package, so the NEXT List reports the same
+    // failure server-side as load_failed. Keeping the client-side alert past
+    // that refresh renders one signature failure twice, ~1200 characters of
+    // it, with no indication the two lines are the same event.
+    mocks.ListPlugins.mockResolvedValueOnce([uncachedRow('plugin-d2')]).mockResolvedValue([
+      makePlugin({
+        name: 'plugin-d2',
+        state: 'unauthorized',
+        declared_unresolved: true,
+        declared_unresolved_reason: 'load_failed',
+        declared_error: 'verify plugin.json signature: plugin package is not trusted',
+      }),
+    ])
+    mocks.ResolvePlugin.mockRejectedValue(UNTRUSTED_CHAIN)
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 plugin-d2' })
+    fireEvent.click(within(row).getByRole('button', { name: '取回声明' }))
+    await screen.findByText(/该插件包未通过信任校验/)
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+
+    await waitFor(() => {
+      const refreshed = screen.getByRole('group', { name: '插件 plugin-d2' })
+      expect(within(refreshed).queryByText(/该插件包未通过信任校验/)).not.toBeInTheDocument()
+    })
+    // The server's own account of the same failure survives — clearing the
+    // duplicate must not clear the report.
+    const refreshed = screen.getByRole('group', { name: '插件 plugin-d2' })
+    expect(within(refreshed).getByText(/插件声明解析失败/)).toBeInTheDocument()
+  })
+
+  it('F2: a stale 重试失败 does not resurface on a later convergence', async () => {
+    // retryError is keyed by plugin name and load() never cleared it, while
+    // load() DOES clear the override that gates its rendering. So the stale
+    // text is invisible right after the refresh and reappears the moment a
+    // new grant reports pending_convergence — attributing an old failure to
+    // a request that has not failed.
+    mocks.ListPlugins.mockResolvedValue([makePlugin({ name: 'plugin-rt', state: 'unauthorized' })])
+    const pendingResult = main.ConsentResultDTO.createFrom({
+      name: 'plugin-rt',
+      pending_convergence: true,
+      convergence_detail: 'apply deferred: 1 task still running',
+      granted_capabilities: [],
+      granted_allowed_hosts: [],
+      granted_allowed_paths: [],
+    })
+    mocks.GrantPlugin.mockResolvedValueOnce(pendingResult)
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 plugin-rt' })
+    fireEvent.click(within(row).getByRole('button', { name: '授权' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认并授权' }))
+    await screen.findByText('已授权，等待收敛生效')
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    mocks.GrantPlugin.mockRejectedValueOnce('grant plugin "plugin-rt": boundary not reached')
+    fireEvent.click(
+      within(screen.getByRole('group', { name: '插件 plugin-rt' })).getByRole('button', { name: '重试收敛' }),
+    )
+    await screen.findByText(/重试失败/)
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    await waitFor(() => expect(mocks.ListPlugins).toHaveBeenCalledTimes(2))
+
+    // A fresh grant that is merely pending must not inherit the old failure.
+    mocks.GrantPlugin.mockResolvedValueOnce(pendingResult)
+    fireEvent.click(within(screen.getByRole('group', { name: '插件 plugin-rt' })).getByRole('button', { name: '授权' }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认并授权' }))
+    await screen.findByText('已授权，等待收敛生效')
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    const pendingRow = await screen.findByRole('group', { name: '插件 plugin-rt' })
+    expect(within(pendingRow).queryByText(/重试失败/)).not.toBeInTheDocument()
+  })
+
+  it('F1: the untrusted alert states the finding alone and folds the raw chain behind a disclosure', async () => {
+    mocks.ListPlugins.mockResolvedValue([uncachedRow('plugin-t')])
+    mocks.ResolvePlugin.mockRejectedValue(UNTRUSTED_CHAIN)
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 plugin-t' })
+    fireEvent.click(within(row).getByRole('button', { name: '取回声明' }))
+
+    const updated = await screen.findByRole('group', { name: '插件 plugin-t' })
+    const alert = within(updated).getByRole('alert')
+    expect(alert.textContent).toBe('该插件包未通过信任校验，重试无法解决此问题，请联系插件包的提供方。')
+    // The chain is kept, not dropped — an operator diagnosing a supply-chain
+    // problem needs it — but it is one click away instead of in the sentence.
+    expect(within(updated).getByText('显示详细错误')).toBeInTheDocument()
+    expect(within(updated).getByText(/status 422/)).toBeInTheDocument()
+    expect(within(updated).queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
+  })
+
+  it('F1: a plain fetch failure and a declaration-load failure fold their chains the same way', async () => {
+    mocks.ListPlugins.mockResolvedValue([
+      uncachedRow('plugin-p'),
+      makePlugin({
+        name: 'plugin-l',
+        state: 'unauthorized',
+        declared_unresolved: true,
+        declared_unresolved_reason: 'load_failed',
+        declared_error: 'load plugin package "C:\\cache\\sha256\\0d7f": verify plugin.json signature: bad',
+      }),
+    ])
+    mocks.ResolvePlugin.mockRejectedValue('resolve plugin "plugin-p": dial tcp 127.0.0.1:18099: connection refused')
+    render(<PluginsPage />)
+    const loadRow = await screen.findByRole('group', { name: '插件 plugin-l' })
+    expect(within(loadRow).getByText('插件声明解析失败。')).toBeInTheDocument()
+    expect(within(loadRow).getByText('显示详细错误')).toBeInTheDocument()
+    expect(within(loadRow).getByText(/verify plugin.json signature: bad/)).toBeInTheDocument()
+
+    const fetchRow = screen.getByRole('group', { name: '插件 plugin-p' })
+    fireEvent.click(within(fetchRow).getByRole('button', { name: '取回声明' }))
+    const updated = await screen.findByRole('group', { name: '插件 plugin-p' })
+    expect(within(updated).getByText('取回声明失败。')).toBeInTheDocument()
+    expect(within(updated).getByText(/connection refused/)).toBeInTheDocument()
+    expect(within(updated).getByRole('button', { name: '重试' })).toBeInTheDocument()
+  })
+})
