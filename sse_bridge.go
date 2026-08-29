@@ -146,6 +146,29 @@ func consumeSSEWithToken(ctx context.Context, url, token string, emit func(event
 					"type": eventType,
 					"data": data,
 				})
+				// Plugin lifecycle events get their own channel, the way
+				// approval and browser events do. Two reasons, and the second
+				// is the load-bearing one:
+				//
+				//   - the generic channel carries ONE EVENT PER STREAMED
+				//     TOKEN, and waking the plugins panel on each of those
+				//     would have it refetch the whole plugin list while the
+				//     model is talking;
+				//   - "which types are plugin events" is a server-side
+				//     contract (loader.publish's type strings), so it belongs
+				//     here in the bridge rather than inside a React component.
+				//
+				// A prefix rather than a switch case: the six types are a
+				// family (plugin/loaded, plugin/unloaded, plugin/suspended,
+				// plugin/resumed, plugin/activation_failed,
+				// plugin/unload_leaked), and a new sibling should reach the
+				// panel without a change here.
+				if strings.HasPrefix(eventType, "plugin/") {
+					emit("agent:plugin", map[string]any{
+						"type": eventType,
+						"data": data,
+					})
+				}
 				switch eventType {
 				case "runtime.token", "token":
 					// Token events get a dedicated channel for the chat stream.
