@@ -15,6 +15,24 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock('../../../wailsjs/go/main/App', () => mocks)
 
+// PluginsPage subscribes to the Wails runtime's plugin event channel, and this
+// suite renders it for real (inside SettingsModal) rather than stubbing it —
+// which is the whole point of these tests. The runtime module talks to
+// window.runtime, which jsdom does not have, so it is mocked here. The
+// canceller is recorded so an unmount that forgets to call it is visible.
+const runtimeMocks = vi.hoisted(() => {
+  const cancels: Array<() => void> = []
+  return {
+    cancels,
+    EventsOn: vi.fn(() => {
+      const cancel = vi.fn()
+      cancels.push(cancel)
+      return cancel
+    }),
+  }
+})
+vi.mock('../../../wailsjs/runtime/runtime', () => ({ EventsOn: runtimeMocks.EventsOn }))
+
 // SettingsModal reads draft/dirty/etc. directly off useConfigStore() (no
 // selector), so the mock just returns a fixed state object. draft stays null
 // so neither the Section list nor AgentConfigPage renders — this test only

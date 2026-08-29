@@ -12,6 +12,23 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock('../../../wailsjs/go/main/App', () => mocks)
 
+// runtimeMocks stands in for the Wails runtime's event API, in the same shape
+// ChatPanel.test.tsx uses: EventsOn records the callback and returns the
+// canceller the component is expected to call on unmount.
+const runtimeMocks = vi.hoisted(() => {
+  const listeners: Record<string, ((...args: any[]) => void)[]> = {}
+  return {
+    listeners,
+    EventsOn: vi.fn((name: string, cb: (...args: any[]) => void) => {
+      ;(listeners[name] ??= []).push(cb)
+      return () => {
+        listeners[name] = (listeners[name] ?? []).filter((registered) => registered !== cb)
+      }
+    }),
+  }
+})
+vi.mock('../../../wailsjs/runtime/runtime', () => ({ EventsOn: runtimeMocks.EventsOn }))
+
 import { PluginsPage } from './PluginsPage'
 import { main } from '../../../wailsjs/go/models'
 import { usePluginConsentStore } from '../../stores/pluginConsentStore'
@@ -41,6 +58,7 @@ beforeEach(() => {
   mocks.DenyPlugin.mockReset()
   mocks.ResolvePlugin.mockReset()
   usePluginConsentStore.setState({ inFlight: 0 })
+  for (const key of Object.keys(runtimeMocks.listeners)) delete runtimeMocks.listeners[key]
 })
 
 describe('PluginsPage — the three states render distinctly', () => {
@@ -839,5 +857,70 @@ describe('PluginsPage — 真机走查抓到的缺陷', () => {
     expect(within(updated).getByText('取回声明失败。')).toBeInTheDocument()
     expect(within(updated).getByText(/connection refused/)).toBeInTheDocument()
     expect(within(updated).getByRole('button', { name: '重试' })).toBeInTheDocument()
+  })
+})
+
+// G5：面板按事件自动刷新。
+//
+// 插件生命周期事件（收敛完成、健康度卸载、依赖恢复）此刻已经从 loader 一路流到
+// 前端，面板此前却只在打开时取一次、之后靠手点刷新——多人运维或后台收敛时，
+// 屏幕上是旧状态。
+//
+// 事件只当「有什么变了」的信号：随后向 ListPlugins 问一次权威状态，不按事件
+// 文本打补丁（那行 message 是给人看的，格式随时会变）。顺带的好处是刷新走的是
+// 面板既有的 load()，因此自动带上 resolved 的对账，两条刷新路径行为一致。
+describe('PluginsPage — 事件驱动的自动刷新', () => {
+  function emitPluginEvent(type = 'plugin/loaded') {
+    for (const cb of runtimeMocks.listeners['agent:plugin'] ?? []) cb({ type, data: '{"message":"plugin=x"}' })
+  }
+
+  it('reloads the list when a plugin lifecycle event arrives', async () => {
+    mocks.ListPlugins.mockResolvedValueOnce([
+      makePlugin({ name: 'plugin-live', state: 'unauthorized' }),
+    ]).mockResolvedValue([makePlugin({ name: 'plugin-live', state: 'loaded', tools: ['t'] })])
+
+    render(<PluginsPage />)
+    await screen.findByRole('group', { name: '插件 plugin-live' })
+    expect(mocks.ListPlugins).toHaveBeenCalledTimes(1)
+
+    emitPluginEvent()
+
+    await waitFor(() => expect(mocks.ListPlugins).toHaveBeenCalledTimes(2))
+    await waitFor(() => {
+      expect(within(screen.getByRole('group', { name: '插件 plugin-live' })).getByText('运行中')).toBeInTheDocument()
+    })
+  })
+
+  it('coalesces a burst of events into a single reload', async () => {
+    // 一次收敛会连发好几条（卸旧、装新、依赖恢复）。每条拉一次列表既放大请求，
+    // 也会把「收敛进行中」的半截状态显示出来。
+    mocks.ListPlugins.mockResolvedValue([makePlugin({ name: 'plugin-burst', state: 'loaded' })])
+    render(<PluginsPage />)
+    await screen.findByRole('group', { name: '插件 plugin-burst' })
+    expect(mocks.ListPlugins).toHaveBeenCalledTimes(1)
+
+    for (let i = 0; i < 5; i++) emitPluginEvent()
+
+    await waitFor(() => expect(mocks.ListPlugins).toHaveBeenCalledTimes(2))
+    // 等过一整个去抖窗口再看：如果没有合并，这里会看到 6 次。
+    // 必须 > pluginEventReloadDelayMs(300)，否则等于什么都没验。
+    await new Promise((resolve) => setTimeout(resolve, 420))
+    expect(mocks.ListPlugins).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops listening when the panel unmounts', async () => {
+    // 设置面板会被反复开关。漏掉 cancel() 就是每开一次多一个监听器，
+    // 最后一次收敛会触发 N 次刷新。
+    mocks.ListPlugins.mockResolvedValue([makePlugin({ name: 'plugin-unmount', state: 'loaded' })])
+    const view = render(<PluginsPage />)
+    await screen.findByRole('group', { name: '插件 plugin-unmount' })
+
+    view.unmount()
+    emitPluginEvent()
+    // 必须等过整个去抖窗口（300ms）：等得比它短，一个仍在排队的刷新会被漏掉,
+    // 这条测试就无法发现「卸载时忘了退订」。
+    await new Promise((resolve) => setTimeout(resolve, 420))
+
+    expect(mocks.ListPlugins).toHaveBeenCalledTimes(1)
   })
 })
