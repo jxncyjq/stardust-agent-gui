@@ -43,11 +43,13 @@ function makePlugin(overrides: Partial<main.PluginDTO> = {}): main.PluginDTO {
     declared_capabilities: [],
     declared_allowed_hosts: [],
     declared_allowed_paths: [],
+    declared_extensions: [],
     declared_unresolved: false,
     declared_unresolved_reason: '',
     granted_capabilities: [],
     granted_allowed_hosts: [],
     granted_allowed_paths: [],
+    granted_extensions: [],
     ...overrides,
   })
 }
@@ -922,5 +924,42 @@ describe('PluginsPage — 事件驱动的自动刷新', () => {
     await new Promise((resolve) => setTimeout(resolve, 420))
 
     expect(mocks.ListPlugins).toHaveBeenCalledTimes(1)
+  })
+})
+
+// A row-level "重试收敛" resends the SAME grant. Everything the first grant
+// authorized has to travel with it — an extension dropped on the retry would
+// silently revoke a power the operator granted, and the row would go on
+// showing the plugin as authorized.
+describe('PluginsPage — a convergence retry resends the whole grant', () => {
+  it('resends the granted extensions', async () => {
+    mocks.ListPlugins.mockResolvedValue([
+      makePlugin({ name: 'plugin-p', state: 'unauthorized', declared_extensions: ['decide'] }),
+    ])
+    mocks.GrantPlugin.mockResolvedValue(
+      main.ConsentResultDTO.createFrom({
+        name: 'plugin-p',
+        pending_convergence: true,
+        convergence_detail: 'apply deferred',
+        granted_capabilities: [],
+        granted_allowed_hosts: [],
+        granted_allowed_paths: [],
+        granted_extensions: ['decide'],
+      }),
+    )
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 plugin-p' })
+    fireEvent.click(within(row).getByRole('button', { name: '授权' }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: /decide/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '确认并授权' }))
+    await screen.findByText('已授权，等待收敛生效')
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    const pendingRow = await screen.findByRole('group', { name: '插件 plugin-p' })
+    mocks.GrantPlugin.mockClear()
+    fireEvent.click(within(pendingRow).getByRole('button', { name: '重试收敛' }))
+
+    await waitFor(() => expect(mocks.GrantPlugin).toHaveBeenCalled())
+    expect(mocks.GrantPlugin).toHaveBeenCalledWith('plugin-p', [], [], [], ['decide'])
   })
 })

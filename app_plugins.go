@@ -49,12 +49,14 @@ type PluginDTO struct {
 	DeclaredCapabilities     []string `json:"declared_capabilities"`
 	DeclaredAllowedHosts     []string `json:"declared_allowed_hosts"`
 	DeclaredAllowedPaths     []string `json:"declared_allowed_paths"`
+	DeclaredExtensions       []string `json:"declared_extensions"`
 	DeclaredUnresolved       bool     `json:"declared_unresolved"`
 	DeclaredUnresolvedReason string   `json:"declared_unresolved_reason,omitempty"`
 	DeclaredError            string   `json:"declared_error,omitempty"`
 	GrantedCapabilities      []string `json:"granted_capabilities"`
 	GrantedAllowedHosts      []string `json:"granted_allowed_hosts"`
 	GrantedAllowedPaths      []string `json:"granted_allowed_paths"`
+	GrantedExtensions        []string `json:"granted_extensions"`
 }
 
 // ConsentResultDTO is the response body of GrantPlugin/DenyPlugin: the
@@ -215,7 +217,7 @@ func (a *App) ListPlugins() ([]PluginDTO, error) {
 // concurrent manifest edit, 500 disk failure, 403 RBAC denial, 400 malformed
 // request) is returned as an error, never swallowed. Called by React via the
 // Wails bindings.
-func (a *App) GrantPlugin(name string, capabilities, allowedHosts, allowedPaths []string) (ConsentResultDTO, error) {
+func (a *App) GrantPlugin(name string, capabilities, allowedHosts, allowedPaths, extensions []string) (ConsentResultDTO, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return ConsentResultDTO{}, fmt.Errorf("plugin name is required")
@@ -224,6 +226,11 @@ func (a *App) GrantPlugin(name string, capabilities, allowedHosts, allowedPaths 
 		"capabilities":  capabilities,
 		"allowed_hosts": allowedHosts,
 		"allowed_paths": allowedPaths,
+		// extensions is a SUBSET grant, unlike capabilities: an empty list is
+		// a complete answer (the plugin contributes its tools and is consulted
+		// at no seam), which is why it is sent even when empty rather than
+		// omitted.
+		"extensions": extensions,
 	}
 	body, err := a.pluginsPost("/v1/plugins/"+name+"/grant", reqBody)
 	if err != nil {

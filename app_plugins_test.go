@@ -113,7 +113,7 @@ func TestGrantPluginPostsBodyAndPreservesPendingConvergence(t *testing.T) {
 		w.Write([]byte(`{"name":"weather","version":"1.0.0","state":"running","tools":["get_weather"],"declared_capabilities":["http"],"declared_allowed_hosts":["api.weather.example"],"declared_allowed_paths":[],"declared_unresolved":false,"granted_capabilities":["http"],"granted_allowed_hosts":["api.weather.example"],"granted_allowed_paths":[],"pending_convergence":true,"convergence_detail":"a concurrent apply is already running"}`))
 	})
 
-	result, err := a.GrantPlugin("weather", []string{"http"}, []string{"api.weather.example"}, nil)
+	result, err := a.GrantPlugin("weather", []string{"http"}, []string{"api.weather.example"}, nil, []string{"observe"})
 	if err != nil {
 		t.Fatalf("GrantPlugin: %v", err)
 	}
@@ -122,6 +122,13 @@ func TestGrantPluginPostsBodyAndPreservesPendingConvergence(t *testing.T) {
 	}
 	if gotBody == "" {
 		t.Error("grant request body was empty")
+	}
+	// extensions travels in the body like the other three dimensions. It is
+	// sent even when empty (an empty grant is a complete answer for a subset
+	// dimension), and an omitted field here would read server-side as "no
+	// extensions" by accident rather than by decision.
+	if !strings.Contains(gotBody, `"extensions":["observe"]`) {
+		t.Errorf("grant body = %s, want it to carry the granted extensions", gotBody)
 	}
 	if result.PendingConvergence != true {
 		t.Errorf("PendingConvergence = %v, want true (must not be collapsed into plain success)", result.PendingConvergence)
@@ -142,7 +149,7 @@ func TestGrantPluginPendingConvergenceFalse(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"name":"weather","version":"1.0.0","state":"running","tools":[],"declared_capabilities":[],"declared_allowed_hosts":[],"declared_allowed_paths":[],"declared_unresolved":false,"granted_capabilities":[],"granted_allowed_hosts":[],"granted_allowed_paths":[],"pending_convergence":false}`))
 	})
-	result, err := a.GrantPlugin("weather", nil, nil, nil)
+	result, err := a.GrantPlugin("weather", nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("GrantPlugin: %v", err)
 	}
@@ -163,7 +170,7 @@ func TestGrantPluginFailsLoudOnConflict(t *testing.T) {
 		w.WriteHeader(http.StatusConflict)
 		w.Write([]byte(`{"error":"the plugin deployment manifest changed while this request was running"}`))
 	})
-	result, err := a.GrantPlugin("weather", []string{"http"}, nil, nil)
+	result, err := a.GrantPlugin("weather", []string{"http"}, nil, nil, nil)
 	if err == nil {
 		t.Fatalf("GrantPlugin on 409 = (%+v, nil), want error", result)
 	}
@@ -177,7 +184,7 @@ func TestGrantPluginFailsLoudOnNotFound(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte(`{"error":"no such plugin in the deployment manifest"}`))
 	})
-	if _, err := a.GrantPlugin("ghost", nil, nil, nil); err == nil {
+	if _, err := a.GrantPlugin("ghost", nil, nil, nil, nil); err == nil {
 		t.Fatal("GrantPlugin on 404 = nil error, want error")
 	}
 }
@@ -186,7 +193,7 @@ func TestGrantPluginFailsLoudOnNotFound(t *testing.T) {
 // plugin name must error before any HTTP call is attempted.
 func TestGrantPluginValidatesName(t *testing.T) {
 	a := NewApp("") // no backend: validation must short-circuit before any HTTP call
-	if _, err := a.GrantPlugin("", nil, nil, nil); err == nil {
+	if _, err := a.GrantPlugin("", nil, nil, nil, nil); err == nil {
 		t.Error("GrantPlugin(empty name) = nil, want error")
 	}
 }
@@ -355,7 +362,7 @@ func TestPluginBindingsFailLoudBeforeServeHasAPort(t *testing.T) {
 		t.Errorf("ListPlugins error = %v, want it to wrap errServeNotReady", err)
 	}
 
-	if _, err := a.GrantPlugin("any", []string{"log"}, nil, nil); err == nil {
+	if _, err := a.GrantPlugin("any", []string{"log"}, nil, nil, nil); err == nil {
 		t.Fatal("GrantPlugin with no serve port = nil error, want a not-ready error")
 	} else if !errors.Is(err, errServeNotReady) {
 		t.Errorf("GrantPlugin error = %v, want it to wrap errServeNotReady", err)

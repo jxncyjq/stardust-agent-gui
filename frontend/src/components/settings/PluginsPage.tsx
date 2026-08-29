@@ -180,6 +180,7 @@ function denyDialogView(plugin: main.PluginDTO, override?: ConsentOverride): mai
     granted_capabilities: override.result.granted_capabilities,
     granted_allowed_hosts: override.result.granted_allowed_hosts,
     granted_allowed_paths: override.result.granted_allowed_paths,
+    granted_extensions: override.result.granted_extensions,
   })
 }
 
@@ -373,6 +374,11 @@ export function PluginsPage() {
               ov.result.granted_capabilities,
               ov.result.granted_allowed_hosts,
               ov.result.granted_allowed_paths,
+              // Every dimension the first grant authorized travels with the
+              // retry. Dropping one here would silently REVOKE it while the
+              // row went on reporting the plugin as authorized — the retry is
+              // a resend of the same decision, not a new, narrower one.
+              ov.result.granted_extensions,
             )
           : await DenyPlugin(name)
       setOverrides((prev) => ({ ...prev, [name]: { ...ov, result: res } }))

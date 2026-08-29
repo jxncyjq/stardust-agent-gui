@@ -14,6 +14,23 @@ function errText(err: unknown): string {
 
 type Phase = 'form' | 'submitting' | 'result'
 
+// extensionDescription says, in one sentence, what granting a seam actually
+// hands over. The wording for "decide" is the one that matters: an operator
+// must not have to know the ABI to learn that ticking it lets a plugin refuse
+// the agent's tool calls. An unknown name still renders — a newer server may
+// declare a seam this build has no wording for, and hiding it would let a
+// grant happen with nothing on screen explaining it.
+function extensionDescription(extension: string): string {
+  switch (extension) {
+    case 'observe':
+      return '调用结束后只读通知该插件。它改不了结果，也看不到被拒绝的调用。'
+    case 'decide':
+      return '每次工具调用派发前征询该插件，它可以否决这次调用（只能收紧，不能放宽）。它答不出来时该次调用同样被拒。'
+    default:
+      return '本界面尚不认识这个扩展点：授予前请先查阅该插件与服务端版本的文档。'
+  }
+}
+
 export interface PluginConsentDialogProps {
   plugin: main.PluginDTO
   // 'grant' shows the declared-capabilities checklist and the host/path
@@ -48,9 +65,16 @@ export function PluginConsentDialog({ plugin, mode, onClose, onResult }: PluginC
   const declaredCaps = plugin.declared_capabilities ?? []
   const declaredHosts = plugin.declared_allowed_hosts ?? []
   const declaredPaths = plugin.declared_allowed_paths ?? []
+  const declaredExtensions = plugin.declared_extensions ?? []
 
   const [selectedHosts, setSelectedHosts] = useState<Set<string>>(() => new Set(declaredHosts))
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set(declaredPaths))
+  // Extensions start UNTICKED, unlike hosts and paths. Those narrow a grant
+  // the operator is already making; an extension ADDS a power the host does
+  // not otherwise hand out — one of them (decide) can refuse the agent's tool
+  // calls. `agent plugins grant` with no --extensions grants none, and this
+  // dialog must not be a second, looser answer to the same question.
+  const [selectedExtensions, setSelectedExtensions] = useState<Set<string>>(() => new Set())
   const [phase, setPhase] = useState<Phase>('form')
   const [result, setResult] = useState<main.ConsentResultDTO | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -69,6 +93,15 @@ export function PluginConsentDialog({ plugin, mode, onClose, onResult }: PluginC
       const next = new Set(prev)
       if (next.has(path)) next.delete(path)
       else next.add(path)
+      return next
+    })
+  }
+
+  function toggleExtension(extension: string) {
+    setSelectedExtensions((prev) => {
+      const next = new Set(prev)
+      if (next.has(extension)) next.delete(extension)
+      else next.add(extension)
       return next
     })
   }
@@ -118,7 +151,17 @@ export function PluginConsentDialog({ plugin, mode, onClose, onResult }: PluginC
     try {
       const res =
         mode === 'grant'
-          ? await GrantPlugin(plugin.name, declaredCaps, Array.from(selectedHosts), Array.from(selectedPaths))
+          ? await GrantPlugin(
+              plugin.name,
+              declaredCaps,
+              Array.from(selectedHosts),
+              Array.from(selectedPaths),
+              // Ordered by the plugin's own declaration rather than by click
+              // order, so the same set of ticks always produces the same
+              // request — a diff of plugins.json should reflect a changed
+              // decision, not a changed clicking sequence.
+              declaredExtensions.filter((extension) => selectedExtensions.has(extension)),
+            )
           : await DenyPlugin(plugin.name)
       onResult(res)
       setResult(res)
@@ -219,6 +262,37 @@ export function PluginConsentDialog({ plugin, mode, onClose, onResult }: PluginC
                             onChange={() => togglePath(path)}
                           />
                           <span className="font-mono">{path}</span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section>
+                <p className="text-xs font-semibold mb-1">扩展点（默认全不授予）</p>
+                <p className="text-[11px] text-muted-foreground mb-2">
+                  扩展点是<span className="font-semibold">宿主调用插件</span>的方向，与能力相反。不勾选任何一项，插件照常贡献工具，只是不会在这些位置被咨询。
+                </p>
+                {declaredExtensions.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">此插件未请求任何扩展点。</p>
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {declaredExtensions.map((extension) => (
+                      <li key={extension}>
+                        <label className="flex items-start gap-2 text-xs">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5"
+                            checked={selectedExtensions.has(extension)}
+                            onChange={() => toggleExtension(extension)}
+                          />
+                          <span>
+                            <span className="font-mono">{extension}</span>
+                            <span className="block text-[11px] text-muted-foreground">
+                              {extensionDescription(extension)}
+                            </span>
+                          </span>
                         </label>
                       </li>
                     ))}

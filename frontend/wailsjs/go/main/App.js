@@ -70,8 +70,8 @@ export function GetTaskResult(arg1) {
   return window['go']['main']['App']['GetTaskResult'](arg1);
 }
 
-export function GrantPlugin(arg1, arg2, arg3, arg4) {
-  return window['go']['main']['App']['GrantPlugin'](arg1, arg2, arg3, arg4);
+export function GrantPlugin(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['GrantPlugin'](arg1, arg2, arg3, arg4, arg5);
 }
 
 export function HandoffTask(arg1, arg2, arg3) {

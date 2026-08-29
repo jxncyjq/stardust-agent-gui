@@ -37,12 +37,14 @@ export namespace main {
 	    declared_capabilities: string[];
 	    declared_allowed_hosts: string[];
 	    declared_allowed_paths: string[];
+	    declared_extensions: string[];
 	    declared_unresolved: boolean;
 	    declared_unresolved_reason?: string;
 	    declared_error?: string;
 	    granted_capabilities: string[];
 	    granted_allowed_hosts: string[];
 	    granted_allowed_paths: string[];
+	    granted_extensions: string[];
 	    pending_convergence: boolean;
 	    convergence_detail?: string;
 	
@@ -60,12 +62,14 @@ export namespace main {
 	        this.declared_capabilities = source["declared_capabilities"];
 	        this.declared_allowed_hosts = source["declared_allowed_hosts"];
 	        this.declared_allowed_paths = source["declared_allowed_paths"];
+	        this.declared_extensions = source["declared_extensions"];
 	        this.declared_unresolved = source["declared_unresolved"];
 	        this.declared_unresolved_reason = source["declared_unresolved_reason"];
 	        this.declared_error = source["declared_error"];
 	        this.granted_capabilities = source["granted_capabilities"];
 	        this.granted_allowed_hosts = source["granted_allowed_hosts"];
 	        this.granted_allowed_paths = source["granted_allowed_paths"];
+	        this.granted_extensions = source["granted_extensions"];
 	        this.pending_convergence = source["pending_convergence"];
 	        this.convergence_detail = source["convergence_detail"];
 	    }
@@ -109,12 +113,14 @@ export namespace main {
 	    declared_capabilities: string[];
 	    declared_allowed_hosts: string[];
 	    declared_allowed_paths: string[];
+	    declared_extensions: string[];
 	    declared_unresolved: boolean;
 	    declared_unresolved_reason?: string;
 	    declared_error?: string;
 	    granted_capabilities: string[];
 	    granted_allowed_hosts: string[];
 	    granted_allowed_paths: string[];
+	    granted_extensions: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new PluginDTO(source);
@@ -130,12 +136,14 @@ export namespace main {
 	        this.declared_capabilities = source["declared_capabilities"];
 	        this.declared_allowed_hosts = source["declared_allowed_hosts"];
 	        this.declared_allowed_paths = source["declared_allowed_paths"];
+	        this.declared_extensions = source["declared_extensions"];
 	        this.declared_unresolved = source["declared_unresolved"];
 	        this.declared_unresolved_reason = source["declared_unresolved_reason"];
 	        this.declared_error = source["declared_error"];
 	        this.granted_capabilities = source["granted_capabilities"];
 	        this.granted_allowed_hosts = source["granted_allowed_hosts"];
 	        this.granted_allowed_paths = source["granted_allowed_paths"];
+	        this.granted_extensions = source["granted_extensions"];
 	    }
 	}
 	export class SearchHit {
