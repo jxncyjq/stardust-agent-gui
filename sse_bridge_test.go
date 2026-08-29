@@ -244,3 +244,94 @@ func TestConsumeSSEForwardsBrowserSession(t *testing.T) {
 		t.Fatalf("browser:session not forwarded; got %+v", got)
 	}
 }
+
+// sseServer serves one fixed set of SSE frames and closes. It is the same
+// shape the approval test builds inline, extracted so the plugin tests below
+// do not repeat it twice more.
+func sseServer(t *testing.T, frames ...string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		for _, frame := range frames {
+			fmt.Fprint(w, frame)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	}))
+}
+
+// TestConsumeSSEEmitsPluginEventsOnTheirOwnChannel: the plugins panel refreshes
+// off these, and it must not have to filter them out of the generic firehose —
+// which carries one event per streamed token.
+func TestConsumeSSEEmitsPluginEventsOnTheirOwnChannel(t *testing.T) {
+	srv := sseServer(t,
+		"event: plugin/loaded\ndata: {\"message\":\"plugin=legion-hello tools=1\"}\n\n",
+		"event: plugin/unloaded\ndata: {\"message\":\"plugin=legion-hello reason=health\"}\n\n",
+	)
+	defer srv.Close()
+
+	got := collectSSE(t, srv.URL)
+
+	var plugin, generic int
+	for _, e := range got {
+		switch e.event {
+		case "agent:plugin":
+			plugin++
+		case "agent:event":
+			generic++
+		}
+	}
+	if plugin != 2 {
+		t.Errorf("agent:plugin emissions = %d, want 2 (one per plugin frame); got %+v", plugin, got)
+	}
+	// The generic channel must keep carrying them too: existing consumers
+	// (the events tab) still read from it, and this must not be a move.
+	if generic != 2 {
+		t.Errorf("agent:event emissions = %d, want 2: the dedicated channel is an addition, not a move", generic)
+	}
+}
+
+func TestConsumeSSEPluginChannelCarriesTypeAndData(t *testing.T) {
+	srv := sseServer(t, "event: plugin/suspended\ndata: {\"message\":\"plugin=a unresolved=[b]\"}\n\n")
+	defer srv.Close()
+
+	for _, e := range collectSSE(t, srv.URL) {
+		if e.event != "agent:plugin" {
+			continue
+		}
+		payload, ok := e.data.(map[string]any)
+		if !ok {
+			t.Fatalf("agent:plugin payload = %T, want map[string]any", e.data)
+		}
+		if payload["type"] != "plugin/suspended" {
+			t.Errorf("payload type = %v, want plugin/suspended", payload["type"])
+		}
+		if payload["data"] == "" || payload["data"] == nil {
+			t.Errorf("payload data = %v, want the raw event body", payload["data"])
+		}
+		return
+	}
+	t.Fatal("no agent:plugin emission at all")
+}
+
+// TestConsumeSSEDoesNotPutOtherEventsOnThePluginChannel is the half that keeps
+// the channel useful: a token stream emits one event per delta, and waking the
+// plugins panel on each of them would make it refetch the whole plugin list
+// while the model is talking.
+func TestConsumeSSEDoesNotPutOtherEventsOnThePluginChannel(t *testing.T) {
+	srv := sseServer(t,
+		"event: runtime.token\ndata: {\"task_id\":\"t1\",\"message\":\"hel\"}\n\n",
+		"event: task_completed\ndata: {\"task_id\":\"t1\"}\n\n",
+		"event: pluginish\ndata: {\"message\":\"not a plugin event\"}\n\n",
+	)
+	defer srv.Close()
+
+	for _, e := range collectSSE(t, srv.URL) {
+		if e.event == "agent:plugin" {
+			t.Errorf("agent:plugin emitted for a non-plugin frame: %+v", e)
+		}
+	}
+}

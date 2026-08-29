@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { EventsOn } from '../../../wailsjs/runtime/runtime'
 import { ListPlugins, GrantPlugin, DenyPlugin, ResolvePlugin } from '../../../wailsjs/go/main/App'
 import { main } from '../../../wailsjs/go/models'
 import { PluginConsentDialog } from './PluginConsentDialog'
@@ -134,11 +135,22 @@ function ErrorDetail({
   )
 }
 
+// pluginEventReloadDelayMs is the trailing debounce on event-driven reloads.
+//
+// Long enough that one convergence's burst of events collapses into a single
+// refetch, short enough that an operator watching the panel sees the result as
+// "immediately". It is not a poll interval: with no events, nothing runs.
+const pluginEventReloadDelayMs = 300
+
 // ConsentOverride is what a completed Grant/Deny call leaves behind for one
 // plugin row, so the row can render the fresh outcome immediately instead of
 // waiting on a manual refresh (ListPlugins carries no push/SSE channel).
 // mode records which call produced it, so a "重试收敛" retry resubmits the
 // SAME kind of request.
+//
+// (The panel now also reloads on plugin lifecycle events — see the effect in
+// PluginsPage — but an override is still what shows a decision the operator
+// just made BEFORE the convergence event arrives.)
 interface ConsentOverride {
   result: main.ConsentResultDTO
   mode: 'grant' | 'deny'
@@ -300,6 +312,41 @@ export function PluginsPage() {
 
   useEffect(() => {
     load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // A plugin lifecycle event means SOMETHING CHANGED — it is not the change
+  // itself. The event's message is a line written for a human
+  // ("plugin=foo reason=health category=trap revoked=2"); patching row state
+  // out of it would tie this panel to a string format nobody promised to keep,
+  // and this file has already paid for that kind of coupling once (see
+  // UNTRUSTED_MARKER). So the event triggers one question to the authoritative
+  // source instead, through the SAME load() the 刷新 button uses — which is
+  // also what keeps the `resolved` reconciliation identical on both paths.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const cancel = EventsOn('agent:plugin', () => {
+      // Trailing debounce, and it is not an optimisation: one convergence
+      // emits several events (unload the old, load the new, resume a
+      // dependent), so refetching per event both multiplies the requests and
+      // paints the half-converged states on the way through.
+      if (timer !== undefined) {
+        clearTimeout(timer)
+      }
+      timer = setTimeout(() => {
+        timer = undefined
+        load()
+      }, pluginEventReloadDelayMs)
+    })
+    return () => {
+      // Both halves matter: the settings modal is opened and closed
+      // repeatedly, so a missed cancel() leaves one more listener behind every
+      // time, and a missed clearTimeout fires load() into an unmounted tree.
+      cancel()
+      if (timer !== undefined) {
+        clearTimeout(timer)
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
