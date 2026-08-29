@@ -436,3 +436,16 @@ describe('PluginConsentDialog — extensions are opt-in per seam', () => {
     expect(screen.getByText(/未请求任何扩展点/)).toBeInTheDocument()
   })
 })
+
+// The prompt extension is the one whose cost is invisible in a tool list: a
+// block of text this plugin wrote reaches the model on every inference. The
+// dialog has to say that before the box is ticked.
+describe('PluginConsentDialog — the prompt extension states its cost', () => {
+  it('says the text enters the system prompt on every inference', () => {
+    const plugin = makePlugin({ declared_extensions: ['prompt'] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    expect(screen.getByText(/系统提示词/)).toBeInTheDocument()
+    expect(screen.getByText(/每次推理/)).toBeInTheDocument()
+  })
+})
