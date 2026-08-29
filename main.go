@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/stardust/legion-agent/serve"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -50,6 +51,13 @@ func main() {
 //  2. LEGION_CONFIG env var
 //  3. auto-discovery: search the working dir and the executable dir (walking up
 //     a few levels) for agent.json or legionAgent/agent.json
+//  4. the per-user default: <STARDUST_HOME or ~/.stardust>/agent.json
+//
+// The local search comes BEFORE the per-user default on purpose: someone who
+// starts the GUI from inside a checkout that has its own agent.json means that
+// one — the more specific answer wins, and that is also what every existing
+// developer setup relies on. The home directory is the fallback for an
+// installed GUI started from anywhere.
 //
 // Returns "" when nothing is found, in which case the service uses built-in
 // defaults (demo response).
@@ -96,6 +104,13 @@ func resolveConfigPath() string {
 			}
 			dir = parent
 		}
+	}
+
+	// The per-user default, shared with the CLI through the serve package
+	// rather than re-derived here: two spellings of "~/.stardust/agent.json"
+	// would eventually disagree.
+	if fromHome := serve.DefaultConfigPathIfPresent(); fromHome != "" {
+		return fromHome
 	}
 	return ""
 }
