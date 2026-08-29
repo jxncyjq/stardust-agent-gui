@@ -29,6 +29,10 @@ describe('approvalStore', () => {
       task_id: 'task-1',
       tool: 'shell',
       arguments: { cmd: 'ls' },
+      // An event that names no source is the host's own rule: that is where
+      // every ticket came from before plugins could raise one.
+      requested_by: 'host:sensitive',
+      reason: '',
     })
   })
 
@@ -66,5 +70,36 @@ describe('approvalStore', () => {
     await useApprovalStore.getState().load()
     const pending = useApprovalStore.getState().pending
     expect(pending.map((t) => t.ticket_id).sort()).toEqual(['t1', 't2'])
+  })
+})
+
+// A ticket now has two possible sources: the host's own sensitive-tool rule
+// and any plugin granted the decide extension. The store has to carry that
+// through from BOTH inputs, or the prompt cannot say who is asking.
+describe('approvalStore — provenance', () => {
+  it('keeps requested_by and reason from GET /v1/approvals', async () => {
+    mocks.ListPendingApprovals.mockResolvedValue([
+      {
+        ticket_id: 't1',
+        task_id: 'task-1',
+        tool_name: 'write_file',
+        arguments: {},
+        requested_by: 'plugin:legion-gatekeeper',
+        reason: 'writes are frozen during the incident',
+      },
+    ])
+
+    await useApprovalStore.getState().load()
+
+    const ticket = useApprovalStore.getState().pending[0]
+    expect(ticket.requested_by).toBe('plugin:legion-gatekeeper')
+    expect(ticket.reason).toBe('writes are frozen during the incident')
+  })
+
+  it('defaults an unattributed ticket to the host', () => {
+    useApprovalStore.getState().onPending({ ticket_id: 't2', task_id: 'task-1', tool: 'write_file' })
+
+    const ticket = useApprovalStore.getState().pending.find((t) => t.ticket_id === 't2')
+    expect(ticket?.requested_by).toBe('host:sensitive')
   })
 })

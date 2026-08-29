@@ -28,6 +28,25 @@ function formatArgValue(value: unknown): string {
 // event carries. A 404 (ticket gone) or 409 (already decided) response — or
 // any other failure — is shown inline rather than swallowed; the ticket stays
 // in the list so the user can see the decision did not go through.
+// requesterLine says who wants this call approved, in words rather than in
+// the wire form. The two sources call for different judgement: the
+// deployment's own sensitivity rule is a standing policy, while a plugin's
+// ask is one installed component's opinion — and the operator has to be able
+// to tell which one stopped the task.
+//
+// An unfamiliar prefix is shown verbatim rather than hidden: a newer server
+// may name a source this build has no wording for, and "somebody asked" is
+// strictly worse than the raw string.
+function requesterLine(ticket: { requested_by: string }): string {
+  if (ticket.requested_by === 'host:sensitive') {
+    return '由本部署的敏感工具规则要求审批'
+  }
+  if (ticket.requested_by.startsWith('plugin:')) {
+    return `由插件 ${ticket.requested_by.slice('plugin:'.length)} 要求审批`
+  }
+  return `由 ${ticket.requested_by} 要求审批`
+}
+
 export function ApprovalPrompt() {
   const pending = useApprovalStore((s) => s.pending)
   const onResolved = useApprovalStore((s) => s.onResolved)
@@ -64,6 +83,8 @@ export function ApprovalPrompt() {
           <div className="font-medium text-foreground">
             待批准工具调用: <span className="font-mono">{ticket.tool || '(未知工具)'}</span>
           </div>
+          <div className="mt-0.5 text-xs text-muted-foreground">{requesterLine(ticket)}</div>
+          {ticket.reason && <div className="mt-0.5 text-xs text-foreground">理由: {ticket.reason}</div>}
           {Object.keys(ticket.arguments).length > 0 && (
             <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
               {Object.entries(ticket.arguments).map(([key, value]) => (
