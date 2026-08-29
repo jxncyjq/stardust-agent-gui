@@ -23,10 +23,12 @@ function makePlugin(overrides: Partial<main.PluginDTO> = {}): main.PluginDTO {
     declared_capabilities: [],
     declared_allowed_hosts: [],
     declared_allowed_paths: [],
+    declared_extensions: [],
     declared_unresolved: false,
     granted_capabilities: [],
     granted_allowed_hosts: [],
     granted_allowed_paths: [],
+    granted_extensions: [],
     ...overrides,
   })
 }
@@ -376,5 +378,61 @@ describe('PluginConsentDialog — error recovery is surfaced, not a dead end', (
     fireEvent.click(screen.getByRole('button', { name: '确认撤销' }))
     await screen.findByText(/请求失败：revoke failed/)
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+  })
+})
+
+// Extensions are the other direction from capabilities: the HOST calls the
+// PLUGIN. One of them (decide) can refuse the agent's tool calls, so the
+// dialog has to say what is being handed over, and the operator has to opt in
+// per seam — the CLI's --extensions flag grants nothing when omitted, and a
+// dialog that pre-ticked them would be a second, looser answer to the same
+// question.
+describe('PluginConsentDialog — extensions are opt-in per seam', () => {
+  it('renders one unchecked checkbox per declared extension', () => {
+    const plugin = makePlugin({ declared_extensions: ['observe', 'decide'] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    const boxes = screen.getAllByRole('checkbox')
+    expect(boxes).toHaveLength(2)
+    for (const box of boxes) expect(box).not.toBeChecked()
+  })
+
+  it('says in plain words that decide can refuse tool calls', () => {
+    const plugin = makePlugin({ declared_extensions: ['decide'] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+    expect(screen.getByText(/否决/)).toBeInTheDocument()
+  })
+
+  it('grants no extension when none was ticked', async () => {
+    mocks.GrantPlugin.mockResolvedValue(
+      main.ConsentResultDTO.createFrom({ view: makePlugin(), pending_convergence: false, convergence_detail: '' }),
+    )
+    const plugin = makePlugin({ declared_capabilities: ['log'], declared_extensions: ['observe', 'decide'] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '确认并授权' }))
+
+    await waitFor(() => expect(mocks.GrantPlugin).toHaveBeenCalled())
+    expect(mocks.GrantPlugin).toHaveBeenCalledWith('sample-plugin', ['log'], [], [], [])
+  })
+
+  it('sends only the extensions that were ticked', async () => {
+    mocks.GrantPlugin.mockResolvedValue(
+      main.ConsentResultDTO.createFrom({ view: makePlugin(), pending_convergence: false, convergence_detail: '' }),
+    )
+    const plugin = makePlugin({ declared_capabilities: ['log'], declared_extensions: ['observe', 'decide'] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /observe/ }))
+    fireEvent.click(screen.getByRole('button', { name: '确认并授权' }))
+
+    await waitFor(() => expect(mocks.GrantPlugin).toHaveBeenCalled())
+    expect(mocks.GrantPlugin).toHaveBeenCalledWith('sample-plugin', ['log'], [], [], ['observe'])
+  })
+
+  it('says so when a plugin asks for no extension at all', () => {
+    const plugin = makePlugin({ declared_capabilities: ['log'] })
+    render(<PluginConsentDialog plugin={plugin} mode="grant" onClose={vi.fn()} onResult={vi.fn()} />)
+    expect(screen.getByText(/未请求任何扩展点/)).toBeInTheDocument()
   })
 })
