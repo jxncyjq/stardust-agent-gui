@@ -8,6 +8,15 @@ export interface ApprovalTicket {
   task_id: string
   tool: string
   arguments: Record<string, unknown>
+  // requested_by is who wants this call approved: 'host:sensitive' for the
+  // deployment's own sensitive-tool rule, or 'plugin:<name>' for a plugin
+  // granted the decide extension. A ticket that names neither is one the
+  // person deciding cannot judge, so an absent value reads as the host — the
+  // source every ticket had before plugins could raise one.
+  requested_by: string
+  // reason is the requester's own words. The host's rule gives none (the
+  // tool's sensitivity is the whole reason); a plugin's ask carries its own.
+  reason: string
 }
 
 // ApprovalPendingEvent is the parsed payload of an SSE approval_pending
@@ -18,6 +27,8 @@ interface ApprovalPendingEvent {
   task_id?: unknown
   tool?: unknown
   arguments?: unknown
+  requested_by?: unknown
+  reason?: unknown
 }
 
 // ApprovalResolvedEvent is the parsed payload of an SSE approval_resolved
@@ -53,11 +64,14 @@ interface ApprovalState {
 function normalizeTicket(raw: Record<string, unknown>): ApprovalTicket {
   const tool = raw.tool ?? raw.tool_name
   const args = raw.arguments
+  const requestedBy = typeof raw.requested_by === 'string' ? raw.requested_by.trim() : ''
   return {
     ticket_id: typeof raw.ticket_id === 'string' ? raw.ticket_id : String(raw.ticket_id ?? ''),
     task_id: typeof raw.task_id === 'string' ? raw.task_id : String(raw.task_id ?? ''),
     tool: typeof tool === 'string' ? tool : String(tool ?? ''),
     arguments: args && typeof args === 'object' ? (args as Record<string, unknown>) : {},
+    requested_by: requestedBy || 'host:sensitive',
+    reason: typeof raw.reason === 'string' ? raw.reason : '',
   }
 }
 

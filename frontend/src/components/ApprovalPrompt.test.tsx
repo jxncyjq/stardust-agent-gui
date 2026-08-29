@@ -103,3 +103,47 @@ describe('ApprovalPrompt', () => {
     expect(useApprovalStore.getState().pending).toHaveLength(1)
   })
 })
+
+// Who is asking changes what the person deciding should think about, so the
+// card says it. A plugin's ticket also carries the plugin's own reason — the
+// whole of what it knows about why this call deserves a look.
+describe('ApprovalPrompt — who asked', () => {
+  it('names the plugin and its reason on a plugin-raised ticket', () => {
+    useApprovalStore.setState({
+      pending: [
+        {
+          ticket_id: 't1',
+          task_id: 'task-1',
+          tool: 'write_file',
+          arguments: {},
+          requested_by: 'plugin:legion-gatekeeper',
+          reason: 'writes are frozen during the incident',
+        },
+      ],
+    })
+
+    render(<ApprovalPrompt />)
+
+    expect(screen.getByText(/legion-gatekeeper/)).toBeInTheDocument()
+    expect(screen.getByText(/writes are frozen during the incident/)).toBeInTheDocument()
+  })
+
+  it('says the deployment itself asked on a host ticket', () => {
+    useApprovalStore.setState({
+      pending: [
+        {
+          ticket_id: 't2',
+          task_id: 'task-1',
+          tool: 'write_file',
+          arguments: {},
+          requested_by: 'host:sensitive',
+          reason: '',
+        },
+      ],
+    })
+
+    render(<ApprovalPrompt />)
+
+    expect(screen.getByText(/敏感工具/)).toBeInTheDocument()
+  })
+})
