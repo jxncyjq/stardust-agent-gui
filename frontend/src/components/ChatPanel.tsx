@@ -82,7 +82,14 @@ const POLL_INTERVAL_MS = 3000
 // failure mode that unlimited max_tool_rounds made routine. This bound exists
 // only so a wait cannot leak forever, and hitting it reports the truth.
 const TASK_WAIT_TIMEOUT_MS = 30 * 60 * 1000
-const TERMINAL_STATUSES = ['done', 'failed', 'suspended', 'cancelled']
+// A task's terminal statuses. 'suspended' is deliberately NOT one of them: a
+// suspended task is waiting for a human to answer an approval ticket, and it
+// resumes into done/failed once they do. Treating it as terminal froze the
+// bubble on "任务状态: suspended，暂无结果" forever — the approval could be
+// granted, the tool could run, the task could finish, and the screen would
+// never move. The long TASK_WAIT_TIMEOUT_MS above is what bounds the wait
+// instead, and hitting it still reports the truth.
+const TERMINAL_STATUSES = ['done', 'failed', 'cancelled']
 // Terminal lifecycle events on the SSE stream (serve emits RuntimeEvent types
 // with underscores; the payload carries task_id).
 const TERMINAL_EVENT_TYPES = ['task_completed', 'task_failed', 'task_cancelled']
