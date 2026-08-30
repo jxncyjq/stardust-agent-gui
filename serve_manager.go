@@ -50,6 +50,15 @@ func (m *ServeManager) Start(appCtx context.Context, configPath string) error {
 	result, err := serve.BuildService(ctx, serve.Options{
 		ConfigPath: configPath,
 		Addr:       "127.0.0.1:0",
+		// Ask for the bearer token explicitly. The serve used to INFER
+		// hardening from an empty Addr ("nobody said where to listen, so this
+		// must be an embedder") -- and this embedder does say, because it wants
+		// a random loopback port. So every shipped GUI ran an agent that asked
+		// no caller for anything: any process on the machine could list
+		// sessions, read the workspace through /v1/files and run tasks. The
+		// token is captured below and attached by the App's HTTP transport and
+		// both SSE bridges.
+		LoopbackHardening: true,
 	})
 	if err != nil {
 		cancel()
