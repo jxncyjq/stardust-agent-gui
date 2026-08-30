@@ -646,6 +646,56 @@ func (a *App) BrowserSetViewport(sessionID string, width int, height int) error 
 	return a.browserPost("/v1/browser/sessions/"+sessionID+"/viewport", map[string]any{"width": width, "height": height})
 }
 
+// BrowserNavigate drives the browser by hand: an address typed into the
+// toolbar, or back/forward/reload.
+//
+// url and action are mutually exclusive, and an empty request is refused HERE
+// rather than sent on: it would arrive as "navigate to nothing", and the serve
+// answers that with a 400 the user reads as "the button is broken".
+//
+// Everything else — takeover required, URL policy, unknown action — is the
+// serve's decision, deliberately not duplicated here: two copies of a policy
+// drift, and the copy in the client is the one nobody updates.
+func (a *App) BrowserNavigate(sessionID, url, action string) error {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return fmt.Errorf("session id is required")
+	}
+	url = strings.TrimSpace(url)
+	action = strings.TrimSpace(action)
+	if url == "" && action == "" {
+		return fmt.Errorf("navigation needs either a url or an action (back, forward, reload)")
+	}
+	if url != "" && action != "" {
+		return fmt.Errorf("navigation takes a url or an action, not both")
+	}
+	body := map[string]any{}
+	if url != "" {
+		body["url"] = url
+	} else {
+		body["action"] = action
+	}
+	return a.browserPost("/v1/browser/sessions/"+sessionID+"/navigate", body)
+}
+
+// BrowserSessionInfo returns the session's current state as raw JSON: where the
+// browser is, who is driving, whether the page still exists.
+//
+// Raw JSON rather than a typed struct for the same reason BrowserInput takes a
+// JSON string: the Go side stays a thin forwarder, and a field added on the
+// serve reaches the frontend without a second declaration to keep in step.
+func (a *App) BrowserSessionInfo(sessionID string) (string, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", fmt.Errorf("session id is required")
+	}
+	body, err := a.apiGet("/v1/browser/sessions/" + sessionID + "/info")
+	if err != nil {
+		return "", fmt.Errorf("read browser session info: %w", err)
+	}
+	return string(body), nil
+}
+
 // EnsureBrowserStreamStatus asks the Go-side stream bridge to re-announce the
 // session's current connection state on the browser:stream Wails channel. The
 // React browser view calls it on (re)mount because the bridge emits

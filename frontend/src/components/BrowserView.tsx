@@ -12,6 +12,7 @@ import {
   type InputEvent,
 } from '../lib/browserInput'
 import { BrowserSetViewport } from '../../wailsjs/go/main/App'
+import { BrowserToolbar } from './BrowserToolbar'
 
 // BrowserView：只读展示 Agent 浏览过程；接管开时 canvas 捕获鼠标/键盘注入 Agent 会话。
 export function BrowserView() {
@@ -175,15 +176,15 @@ export function BrowserView() {
 
   return (
     <div className="flex h-full flex-col gap-2 p-2">
+      <BrowserToolbar sessionId={sessionId} takeover={takeover} connected={connected} />
       <div className="flex items-center gap-2 text-xs">
-        <span className={connected ? 'text-green-500' : 'text-amber-500'}>●</span>
-        <span className="text-muted-foreground">session {sessionId}</span>
+        <span className="truncate text-muted-foreground">session {sessionId}</span>
         {progress && (
           <span className="text-muted-foreground">· {progress.action}:{progress.status}</span>
         )}
         <button
           onClick={toggleTakeover}
-          className="ml-auto rounded border border-border px-2 py-0.5 text-xs hover:bg-muted"
+          className="ml-auto shrink-0 rounded border border-border px-2 py-0.5 text-xs hover:bg-muted"
         >
           {takeover ? '退出接管' : '接管'}
         </button>
