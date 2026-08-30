@@ -18,6 +18,10 @@ export function BrowserSessionInfo(arg1) {
   return window['go']['main']['App']['BrowserSessionInfo'](arg1);
 }
 
+export function BrowserSessions(arg1) {
+  return window['go']['main']['App']['BrowserSessions'](arg1);
+}
+
 export function BrowserSetViewport(arg1, arg2, arg3) {
   return window['go']['main']['App']['BrowserSetViewport'](arg1, arg2, arg3);
 }

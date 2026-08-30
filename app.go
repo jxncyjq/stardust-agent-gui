@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -676,6 +677,23 @@ func (a *App) BrowserNavigate(sessionID, url, action string) error {
 		body["action"] = action
 	}
 	return a.browserPost("/v1/browser/sessions/"+sessionID+"/navigate", body)
+}
+
+// BrowserSessions lists the browser sessions of one conversation as raw JSON.
+//
+// 按对话问而不是问全部：视图跟着当前对话走，把别的对话的会话摆进标签条，用户点
+// 进去的是一个与眼前工作无关的页面。
+func (a *App) BrowserSessions(chatSessionID string) (string, error) {
+	chatSessionID = strings.TrimSpace(chatSessionID)
+	path := "/v1/browser/sessions"
+	if chatSessionID != "" {
+		path += "?chat_session_id=" + url.QueryEscape(chatSessionID)
+	}
+	body, err := a.apiGet(path)
+	if err != nil {
+		return "", fmt.Errorf("list browser sessions: %w", err)
+	}
+	return string(body), nil
 }
 
 // BrowserSessionInfo returns the session's current state as raw JSON: where the
