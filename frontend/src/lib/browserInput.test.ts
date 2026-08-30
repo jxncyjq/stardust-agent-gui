@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mapToNormalized, mapToNormalizedContained, Throttler, postInput, postTakeover } from './browserInput'
+import {
+  mapToNormalized,
+  mapToNormalizedContained,
+  Throttler,
+  postInput,
+  postTakeover,
+  keyDownEvents,
+  keyUpEvents,
+  modifiersOf,
+  type KeyLike,
+} from './browserInput'
 
 describe('mapToNormalized', () => {
   const rect = { left: 100, top: 50, width: 200, height: 400 }
@@ -72,5 +82,51 @@ describe('postInput / postTakeover', () => {
   it('propagates a binding rejection (fail-loud)', async () => {
     browserTakeoverMock.mockRejectedValue(new Error('post takeover: status 409'))
     await expect(postTakeover('sess-1', true)).rejects.toThrow(/409/)
+  })
+})
+
+// 修饰键契约：接管里按 Ctrl+C 必须真的是复制，而不是往页面里打一个字母 c。
+//
+// 之前 onKeyDown 的分流只有「单字符 → char，其余 → keydown」，于是 Control/Shift
+// 这些键作为 keydown 发出去，被后端的键名白名单整批拒绝（每按一次 Shift 一条失败
+// 请求），随后的 c 作为 char 落进页面——「复制」变成了「输入 c」。
+describe('modifier contract', () => {
+  const evt = (over: Partial<KeyLike>): KeyLike => ({
+    key: 'a', ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...over,
+  })
+
+  it('sends nothing for a modifier key on its own', () => {
+    for (const key of ['Control', 'Shift', 'Alt', 'Meta']) {
+      expect(keyDownEvents(evt({ key }))).toEqual([])
+      expect(keyUpEvents(evt({ key }))).toEqual([])
+    }
+  })
+
+  it('sends a plain printable character as text', () => {
+    expect(keyDownEvents(evt({ key: 'a' }))).toEqual([{ type: 'char', text: 'a' }])
+    // Shift is already baked into the character; it is not a separate command.
+    expect(keyDownEvents(evt({ key: 'A', shiftKey: true }))).toEqual([{ type: 'char', text: 'A' }])
+    expect(keyUpEvents(evt({ key: 'a' }))).toEqual([])
+  })
+
+  it('sends a shortcut as a key event carrying its modifiers', () => {
+    expect(keyDownEvents(evt({ key: 'c', ctrlKey: true }))).toEqual([
+      { type: 'keydown', key: 'c', modifiers: ['ctrl'] },
+    ])
+    expect(keyUpEvents(evt({ key: 'c', ctrlKey: true }))).toEqual([
+      { type: 'keyup', key: 'c', modifiers: ['ctrl'] },
+    ])
+  })
+
+  it('sends named keys as key events, with whatever is held', () => {
+    expect(keyDownEvents(evt({ key: 'Enter' }))).toEqual([{ type: 'keydown', key: 'Enter' }])
+    expect(keyDownEvents(evt({ key: 'ArrowLeft', shiftKey: true, altKey: true }))).toEqual([
+      { type: 'keydown', key: 'ArrowLeft', modifiers: ['shift', 'alt'] },
+    ])
+  })
+
+  it('reads modifiers off a mouse event so ctrl+click reaches the page', () => {
+    expect(modifiersOf(evt({ ctrlKey: true, metaKey: true }))).toEqual(['ctrl', 'meta'])
+    expect(modifiersOf(evt({}))).toBeUndefined()
   })
 })

@@ -44,17 +44,31 @@ it('open-external calls OpenPath with workingDir + path', () => {
   expect(appMocks.OpenPath).toHaveBeenCalledWith('F:/w', 'r.docx')
 })
 
-it('download calls SaveGeneratedFile', () => {
+it('export calls SaveGeneratedFile', () => {
   render(<FileCard file={docx} />)
-  fireEvent.click(screen.getByRole('button', { name: '下载' }))
+  fireEvent.click(screen.getByRole('button', { name: '导出' }))
   expect(appMocks.SaveGeneratedFile).toHaveBeenCalledWith('F:/w', 'r.docx')
 })
 
-it('copy link resolves a relative url to absolute and copies it', async () => {
-  appMocks.GetBrowserEndpoint.mockResolvedValue({ baseURL: 'http://127.0.0.1:9000', token: 't' })
+// The loopback URL stopped being copyable the moment the embedded serve began
+// requiring a bearer token: pasted into a browser it is a 401, and putting the
+// token on the clipboard would hand the whole agent to whatever reads it next.
+// Taking the file out is what the user wanted; that is 导出.
+it('offers no copy-link for a loopback url, since that link now 401s outside the app', () => {
+  render(<FileCard file={html} />)
+  expect(screen.queryByRole('button', { name: '复制链接' })).toBeNull()
+  expect(screen.getByRole('button', { name: '导出' })).toBeInTheDocument()
+})
+
+// A deployment that configured server.file_base_url published that address on
+// purpose and carries its own auth. Copying it is still the right answer, and
+// it is copied verbatim -- no loopback base to resolve against.
+it('keeps copy-link for a published absolute url and copies it verbatim', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined)
   vi.stubGlobal('navigator', { clipboard: { writeText } })
-  render(<FileCard file={html} />)
+  const published = { ...html, url: 'https://agent.example.com/v1/files?x' }
+  render(<FileCard file={published} />)
   fireEvent.click(screen.getByRole('button', { name: '复制链接' }))
-  await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://127.0.0.1:9000/v1/files?x'))
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://agent.example.com/v1/files?x'))
+  expect(appMocks.GetBrowserEndpoint).not.toHaveBeenCalled()
 })
