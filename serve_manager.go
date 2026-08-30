@@ -22,10 +22,18 @@ type ServeManager struct {
 	// write is a torn read (undefined behavior), not merely a stale value.
 	mu   sync.RWMutex
 	port int
-	// token is the one-time bearer token minted by the embedded loopback serve
-	// in hardening mode (empty when hardening is off). Captured in Start so the
-	// GUI's SSE bridge and HTTP calls can attach Authorization: Bearer.
-	token   string
+	// tokens is the running serve's LIVE credential holder, not a copy of the
+	// string it minted at startup.
+	//
+	// The copy was wrong the moment credentials became rotatable: an operator
+	// burning a leaked token (POST /v1/auth/rotate) would leave the GUI
+	// presenting the dead one on every call, and the whole window would answer
+	// 401 with nothing on screen to say why. Reading through the holder means
+	// the GUI simply keeps working.
+	//
+	// nil = no serve running (or one that mints no token); Token() then answers
+	// "", which is exactly what a caller should send in that state.
+	tokens  *serve.Tokens
 	running atomic.Bool
 	// done is closed when the running service goroutine exits (after its final
 	// serve:status emit), so Restart can wait for a full teardown before
@@ -67,7 +75,7 @@ func (m *ServeManager) Start(appCtx context.Context, configPath string) error {
 		// error still propagates to the caller.
 		m.mu.Lock()
 		m.port = 0
-		m.token = ""
+		m.tokens = nil
 		m.mu.Unlock()
 		return fmt.Errorf("build serve service: %w", err)
 	}
@@ -75,10 +83,10 @@ func (m *ServeManager) Start(appCtx context.Context, configPath string) error {
 	// Compute from the build result into locals first, then take the write lock
 	// only to assign — never hold the lock across the blocking BuildService call.
 	port := listenerPort(result.Listener)
-	token := result.Token // Phase 4C: one-time bearer token minted in loopback-hardening mode
+	tokens := result.Tokens // live holder: survives a rotation, unlike result.Token
 	m.mu.Lock()
 	m.port = port
-	m.token = token
+	m.tokens = tokens
 	m.mu.Unlock()
 	done := make(chan struct{})
 	m.done = done
@@ -96,6 +104,13 @@ func (m *ServeManager) Start(appCtx context.Context, configPath string) error {
 			m.emit(appCtx, "serve:error", map[string]any{"error": err.Error()})
 		}
 		m.running.Store(false)
+		// Drop the credential with the serve that issued it: a token read after
+		// the service is gone can only be presented to a server that no longer
+		// exists, and the bridges read Token() on every reconnect attempt.
+		m.mu.Lock()
+		m.tokens = nil
+		m.port = 0
+		m.mu.Unlock()
 		m.emit(appCtx, "serve:status", map[string]any{
 			"running": false,
 			"port":    0,
@@ -110,10 +125,22 @@ func (m *ServeManager) Running() bool {
 	return m.running.Load()
 }
 
+// Stop cancels the embedded service.
+//
+// It drops the credential and port SYNCHRONOUSLY rather than leaving that to
+// the service goroutine's own teardown: Stop returning means "this manager is
+// no longer serving", and a Token() read in the window between the cancel and
+// the goroutine noticing it would hand a caller a credential for a server that
+// is on its way out. The goroutine clears them again on the way out, which is
+// harmless — both writes say the same thing.
 func (m *ServeManager) Stop() {
 	if m.cancel != nil {
 		m.cancel()
 	}
+	m.mu.Lock()
+	m.tokens = nil
+	m.port = 0
+	m.mu.Unlock()
 }
 
 func (m *ServeManager) Port() int {
@@ -122,13 +149,18 @@ func (m *ServeManager) Port() int {
 	return m.port
 }
 
-// Token returns the one-time bearer token minted by the embedded loopback serve
-// in hardening mode, or "" when hardening is off. Restart refreshes it because
-// it delegates to Start, which re-captures result.Token each launch.
+// Token returns the bearer token the embedded serve accepts RIGHT NOW, or ""
+// when there is none (hardening off, or no serve running).
+//
+// It reads through the live holder rather than returning a captured string, so
+// a rotation on the serve side is invisible to callers — which is the point:
+// every call site reads this per request precisely so it never presents a
+// credential that has since been burned.
 func (m *ServeManager) Token() string {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.token
+	tokens := m.tokens
+	m.mu.RUnlock()
+	return tokens.Current()
 }
 
 // Restart stops the running embedded service, waits for it to fully stop
