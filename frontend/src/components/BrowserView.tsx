@@ -1,7 +1,16 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useBrowserStore } from '../stores/browserStore'
 import { useBrowserStream } from '../hooks/useBrowserStream'
-import { mapToNormalizedContained, Throttler, postInput, postTakeover, type InputEvent } from '../lib/browserInput'
+import {
+  mapToNormalizedContained,
+  Throttler,
+  postInput,
+  postTakeover,
+  keyDownEvents,
+  keyUpEvents,
+  modifiersOf,
+  type InputEvent,
+} from '../lib/browserInput'
 import { BrowserSetViewport } from '../../wailsjs/go/main/App'
 
 // BrowserView：只读展示 Agent 浏览过程；接管开时 canvas 捕获鼠标/键盘注入 Agent 会话。
@@ -110,38 +119,50 @@ export function BrowserView() {
     )
   }
 
+  // held reads the modifiers off a DOM event; every injected event carries the
+  // ones held for it, so ctrl+click opens in a new tab and shift+drag extends a
+  // selection instead of arriving as a bare click.
+  const held = (e: { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean }) => {
+    const modifiers = modifiersOf(e)
+    return modifiers ? { modifiers } : {}
+  }
   const onMouseMove = (e: React.MouseEvent) => {
     if (!takeover) return
     if (!moveThrottle.current.ready(e.timeStamp)) return
     const { x, y } = norm(e)
-    void send([{ type: 'mousemove', x, y }])
+    void send([{ type: 'mousemove', x, y, ...held(e) }])
   }
   const onMouseDown = (e: React.MouseEvent) => {
     if (!takeover) return
     const { x, y } = norm(e)
-    void send([{ type: 'mousedown', x, y, button: mouseButtonName(e.button) }])
+    void send([{ type: 'mousedown', x, y, button: mouseButtonName(e.button), ...held(e) }])
   }
   const onMouseUp = (e: React.MouseEvent) => {
     if (!takeover) return
     const { x, y } = norm(e)
-    void send([{ type: 'mouseup', x, y, button: mouseButtonName(e.button) }])
+    void send([{ type: 'mouseup', x, y, button: mouseButtonName(e.button), ...held(e) }])
   }
   // 不再单独发 DOM click：mousedown + mouseup 已让后端 page.Mouse 合成一次 click。
   // 再发一个 click（injectOne 又做一次 Down+Up）等于双击，并在并发/状态上添乱。
   const onWheel = (e: React.WheelEvent) => {
     if (!takeover) return
     const { x, y } = norm(e)
-    void send([{ type: 'wheel', x, y, deltaX: e.deltaX, deltaY: e.deltaY }])
+    void send([{ type: 'wheel', x, y, deltaX: e.deltaX, deltaY: e.deltaY, ...held(e) }])
   }
+  // The mapping lives in browserInput (keyDownEvents/keyUpEvents) because it is
+  // where the modifier contract is stated and tested: a modifier key on its own
+  // is not sent at all, a plain character is text, and anything held with
+  // ctrl/alt/meta is a shortcut that must reach the page AS a shortcut.
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!takeover) return
     e.preventDefault()
-    if (e.key.length === 1) void send([{ type: 'char', text: e.key }])
-    else void send([{ type: 'keydown', key: e.key }])
+    const events = keyDownEvents(e)
+    if (events.length > 0) void send(events)
   }
   const onKeyUp = (e: React.KeyboardEvent) => {
     if (!takeover) return
-    if (e.key.length !== 1) void send([{ type: 'keyup', key: e.key }])
+    const events = keyUpEvents(e)
+    if (events.length > 0) void send(events)
   }
 
   if (!sessionId) {
