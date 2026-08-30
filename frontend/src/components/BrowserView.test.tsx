@@ -11,6 +11,11 @@ vi.mock('../../wailsjs/go/main/App', () => ({
   BrowserTakeover: (id: string, enabled: boolean) => browserTakeoverMock(id, enabled),
   BrowserInput: (id: string, events: string) => browserInputMock(id, events),
   BrowserSetViewport: (id: string, w: number, h: number) => browserSetViewportMock(id, w, h),
+  // 工具栏（BrowserToolbar）随视图一起挂载，会读会话状态；这里给一个够用的答案，
+  // 工具栏自身的行为在 BrowserToolbar.test.tsx 里测。
+  BrowserSessionInfo: () =>
+    Promise.resolve(JSON.stringify({ session_id: 's1', url: '', takeover: false, has_page: true })),
+  BrowserNavigate: () => Promise.resolve(),
 }))
 vi.mock('../hooks/useBrowserStream', () => ({ useBrowserStream: () => {} }))
 
