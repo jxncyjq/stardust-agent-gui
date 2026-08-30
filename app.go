@@ -35,11 +35,46 @@ func NewApp(cfgPath string) *App {
 	transport.MaxIdleConnsPerHost = 64
 	transport.IdleConnTimeout = 90 * time.Second
 
-	return &App{
+	app := &App{
 		serve:   NewServeManager(),
 		cfgPath: cfgPath,
-		client:  &http.Client{Transport: transport, Timeout: 120 * time.Second},
 	}
+	// Authenticate at the TRANSPORT, not at each call site. The serve this app
+	// starts mints a one-time loopback bearer token, and every request to it
+	// must carry that token — reads did, and six write call sites each did not,
+	// which a real-machine walkthrough surfaced as "creating a session failed:
+	// 401" the first time anybody tried to send a message. Attaching it here
+	// makes the next call site correct by construction instead of by memory.
+	app.client = &http.Client{
+		Transport: &loopbackAuthTransport{base: transport, token: app.serve.Token},
+		Timeout:   120 * time.Second,
+	}
+	return app
+}
+
+// loopbackAuthTransport adds the embedded serve's bearer token to every
+// request that does not already carry one.
+//
+// The token is read PER REQUEST rather than captured: a Restart mints a fresh
+// one, and a captured token would be rejected by the serve that replaced it.
+// An empty token means a serve that minted none (a deployment with its own
+// admin_token, or one not running in loopback-hardening mode) — that sends no
+// Authorization header at all rather than an empty bearer, which is what keeps
+// the non-hardened path byte-identical to what it was.
+type loopbackAuthTransport struct {
+	base  http.RoundTripper
+	token func() string
+}
+
+func (t *loopbackAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	tok := t.token()
+	if tok == "" || req.Header.Get("Authorization") != "" {
+		return t.base.RoundTrip(req)
+	}
+	// Clone before writing: RoundTrip must not mutate the caller's request.
+	cloned := req.Clone(req.Context())
+	cloned.Header.Set("Authorization", "Bearer "+tok)
+	return t.base.RoundTrip(cloned)
 }
 
 func (a *App) startup(ctx context.Context) {

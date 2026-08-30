@@ -757,3 +757,40 @@ describe('ChatPanel task-outcome wait', () => {
     expect(assistants[0].content).not.toContain('任务执行失败')
   })
 })
+
+// A task that suspends for approval is NOT finished: a human answers the
+// ticket and the task resumes. Treating "suspended" as terminal froze the
+// bubble on "任务状态: suspended，暂无结果" forever — a real-machine
+// walkthrough approved the ticket, watched the backend run the tool and reach
+// "done", and the screen never moved.
+describe('ChatPanel keeps waiting through an approval suspend', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reports the resumed task result instead of freezing on suspended', async () => {
+    seedSession()
+    mocks.SubmitTask.mockResolvedValue('task-suspend')
+    // First read: suspended (waiting for a human). Then: the approved run.
+    mocks.GetTaskResult
+      .mockResolvedValueOnce({ status: 'suspended', result: '' })
+      .mockResolvedValue({ status: 'done', result: 'note file' })
+    render(<ChatPanel />)
+
+    fireEvent.change(screen.getByPlaceholderText(/输入消息/), { target: { value: 'read the note' } })
+    fireEvent.click(screen.getByRole('button', { name: '发送消息' }))
+
+    // Fake timers: advance explicitly rather than waiting on wall clock. The
+    // fallback poll runs twice — the first read sees suspended, the second the
+    // resumed result.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000)
+    })
+
+    const assistant = useChatStore.getState().messages.filter((m) => m.role === 'assistant')
+    expect(assistant.some((m) => m.content.includes('suspended，暂无结果'))).toBe(false)
+  })
+})
