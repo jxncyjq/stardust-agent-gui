@@ -16,8 +16,14 @@ import { BrowserToolbar } from './BrowserToolbar'
 import { BrowserTabs } from './BrowserTabs'
 import { useSessionStore } from '../stores/sessionStore'
 
-// BrowserView：只读展示 Agent 浏览过程；接管开时 canvas 捕获鼠标/键盘注入 Agent 会话。
-export function BrowserView() {
+interface BrowserViewProps {
+  // onClose 收起这一栏。栏是用户的意愿，不是会话的属性——收起来不影响 Agent 继续
+  // 浏览，只是不占屏幕。
+  onClose?: () => void
+}
+
+// BrowserView：展示 Agent 的浏览过程；接管开时 canvas 捕获鼠标/键盘注入 Agent 会话。
+export function BrowserView({ onClose }: BrowserViewProps = {}) {
   const sessionId = useBrowserStore((s) => s.sessionId)
   const frameDataUri = useBrowserStore((s) => s.frameDataUri)
   const elements = useBrowserStore((s) => s.elements)
@@ -199,6 +205,16 @@ export function BrowserView() {
         >
           {takeover ? '退出接管' : '接管'}
         </button>
+        {onClose && (
+          <button
+            type="button"
+            aria-label="收起浏览器面板"
+            onClick={onClose}
+            className="interactive shrink-0 rounded border border-border px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            ✕
+          </button>
+        )}
       </div>
       {takeover && (
         <div className="rounded bg-amber-500/20 px-2 py-1 text-center text-xs font-medium text-amber-600">

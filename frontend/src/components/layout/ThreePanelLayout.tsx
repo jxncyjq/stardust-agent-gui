@@ -6,11 +6,18 @@ interface Props {
   sidebar: ReactNode
   chat: ReactNode
   status: ReactNode
+  // browser 是可选的第四栏：**只在真的有浏览器会话时**传进来。
+  //
+  // 它此前挤在右栏的一个 tab 里，于是「看事件」与「看 Agent 在浏览」是二选一——
+  // 而同时看这两样正是这个视图存在的理由。做成可选而不是常驻，是因为没有会话时
+  // 多一条空栏，等于拿屏幕宽度换一个什么都不显示的框。
+  browser?: ReactNode
 }
 
 // Panel width bounds (px). Defaults match the previous fixed w-56 / w-72.
 const SIDEBAR = { min: 160, max: 480, def: 224 }
 const STATUS = { min: 200, max: 640, def: 288 }
+const BROWSER = { min: 240, max: 900, def: 420 }
 const COLLAPSED = 48 // w-12
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v))
@@ -68,7 +75,7 @@ function ResizeHandle({ onResize, ariaLabel }: { onResize: (clientX: number) => 
 // on its inner edge; the open/closed state and pixel widths persist across runs.
 // The panels span the full window width, so the sidebar's right edge sits at the
 // pointer's clientX and the status's left edge at (innerWidth - clientX).
-export function ThreePanelLayout({ sidebar, chat, status }: Props) {
+export function ThreePanelLayout({ sidebar, chat, status, browser }: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(
     () => localStorage.getItem('sidebarOpen') !== 'false'
   )
@@ -77,6 +84,7 @@ export function ThreePanelLayout({ sidebar, chat, status }: Props) {
   )
   const [sidebarWidth, setSidebarWidth] = useState(() => readWidth('sidebarWidth', SIDEBAR))
   const [statusWidth, setStatusWidth] = useState(() => readWidth('statusWidth', STATUS))
+  const [browserWidth, setBrowserWidth] = useState(() => readWidth('browserWidth', BROWSER))
 
   const toggleSidebar = () =>
     setSidebarOpen((o) => {
@@ -98,6 +106,9 @@ export function ThreePanelLayout({ sidebar, chat, status }: Props) {
   useEffect(() => {
     localStorage.setItem('statusWidth', String(statusWidth))
   }, [statusWidth])
+  useEffect(() => {
+    localStorage.setItem('browserWidth', String(browserWidth))
+  }, [browserWidth])
 
   const resizeSidebar = useCallback((clientX: number) => {
     setSidebarWidth(clamp(clientX, SIDEBAR.min, SIDEBAR.max))
@@ -105,6 +116,14 @@ export function ThreePanelLayout({ sidebar, chat, status }: Props) {
   const resizeStatus = useCallback((clientX: number) => {
     setStatusWidth(clamp(window.innerWidth - clientX, STATUS.min, STATUS.max))
   }, [])
+  // 浏览器栏在状态栏左边：它的左边缘跟着指针走，所以宽度是「状态栏左边缘 - 指针」。
+  const resizeBrowser = useCallback(
+    (clientX: number) => {
+      const statusLeftEdge = window.innerWidth - (statusOpen ? statusWidth : COLLAPSED)
+      setBrowserWidth(clamp(statusLeftEdge - clientX, BROWSER.min, BROWSER.max))
+    },
+    [statusOpen, statusWidth],
+  )
 
   return (
     <div className="flex h-full bg-background text-foreground overflow-hidden">
@@ -132,6 +151,20 @@ export function ThreePanelLayout({ sidebar, chat, status }: Props) {
 
       {/* Chat (flex-1) */}
       <main className="flex-1 min-w-0 flex flex-col overflow-hidden">{chat}</main>
+
+      {/* 浏览器栏：只有在有东西可看时才存在（见 Props.browser）。它排在状态栏
+          左边、聊天右边——看着 Agent 浏览时，对话与事件流都还在视野里。 */}
+      {browser !== undefined && browser !== null && (
+        <>
+          <ResizeHandle onResize={resizeBrowser} ariaLabel="调整浏览器面板宽度" />
+          <section
+            className="flex flex-col flex-shrink-0 overflow-hidden border-l border-border"
+            style={{ width: browserWidth }}
+          >
+            {browser}
+          </section>
+        </>
+      )}
 
       {statusOpen && <ResizeHandle onResize={resizeStatus} ariaLabel="拖动调整状态面板宽度" />}
 

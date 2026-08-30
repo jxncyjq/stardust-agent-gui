@@ -13,6 +13,7 @@ import { useUIStore } from './stores/uiStore'
 import type { RightView } from './stores/uiStore'
 import { useThemeStore } from './stores/themeStore'
 import { usePreviewStore } from './stores/previewStore'
+import { useBrowserStore } from './stores/browserStore'
 import { useBrowserSession } from './hooks/useBrowserSession'
 import { useHtmlPreviewEvents } from './hooks/useHtmlPreviewEvents'
 import { cn } from './lib/utils'
@@ -37,12 +38,12 @@ function ThemeToggle() {
   )
 }
 
-// RightPanel switches the third column between the status tabs, the
-// read-only browser view, and the HTML preview. useBrowserSession (mounted
-// at App level) discovers active browser sessions regardless of which view
-// is selected here. The active tab lives in uiStore (not local state) so a
-// backend-pushed or button-triggered preview can pull the column onto its
-// own tab from outside this component.
+// RightPanel switches the third column between the status tabs, the HTML
+// preview and the file list.
+//
+// 浏览器视图**不再**是这里的一个 tab：它有了自己的一栏（见 App）。原因是那个 tab
+// 让「看事件」与「看 Agent 在浏览」变成二选一，而同时看这两样正是这个视图存在的
+// 理由。
 function RightPanel() {
   const view = useUIStore((s) => s.rightView)
   const setView = useUIStore((s) => s.setRightView)
@@ -57,7 +58,6 @@ function RightPanel() {
 
   const views: { id: RightView; label: string }[] = [
     { id: 'status', label: '状态' },
-    { id: 'browser', label: '浏览器' },
     { id: 'preview', label: '预览' },
     { id: 'files', label: '文件' },
   ]
@@ -84,7 +84,6 @@ function RightPanel() {
       </div>
       <div className="flex-1 min-h-0">
         {view === 'status' && <StatusPanel />}
-        {view === 'browser' && <BrowserView />}
         {view === 'preview' && (
           <WebPreviewPanel
             source={source}
@@ -103,11 +102,32 @@ function RightPanel() {
 function App() {
   const settingsOpen = useUIStore((s) => s.settingsOpen)
   const closeSettings = useUIStore((s) => s.closeSettings)
+  const browserPanelOpen = useUIStore((s) => s.browserPanelOpen)
+  const setBrowserPanelOpen = useUIStore((s) => s.setBrowserPanelOpen)
+  const browserSessionId = useBrowserStore((s) => s.sessionId)
   useBrowserSession()
   useHtmlPreviewEvents()
+
+  // Agent 开了一个**新的**浏览器会话时，把收起来的栏重新打开：那一刻用户多半想看
+  // 一眼。同一个会话里反复的事件不会重新打开它——那会变成一个赶不走的面板。
+  useEffect(() => {
+    if (browserSessionId !== null) setBrowserPanelOpen(true)
+  }, [browserSessionId, setBrowserPanelOpen])
+
+  const browsing = browserSessionId !== null
   return (
     <div className="flex flex-col h-screen">
       <div className="flex items-center justify-end gap-1 border-b border-border px-2 py-0.5 bg-background">
+        {/* 收起来之后还得有路回去：只在真的有会话、且面板收着时出现。 */}
+        {browsing && !browserPanelOpen && (
+          <button
+            type="button"
+            className="interactive rounded-md px-2 py-0.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
+            onClick={() => setBrowserPanelOpen(true)}
+          >
+            显示浏览器
+          </button>
+        )}
         <ConnectionBadge />
         <ThemeToggle />
       </div>
@@ -116,6 +136,11 @@ function App() {
           sidebar={<Sidebar />}
           chat={<ChatPanel />}
           status={<RightPanel />}
+          browser={
+            browsing && browserPanelOpen ? (
+              <BrowserView onClose={() => setBrowserPanelOpen(false)} />
+            ) : undefined
+          }
         />
       </div>
       <SettingsModal open={settingsOpen} onClose={closeSettings} />
