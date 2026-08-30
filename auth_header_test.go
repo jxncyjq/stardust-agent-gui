@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/stardust/legion-agent/serve"
 	"net/http"
 	"sync"
 	"testing"
@@ -75,7 +76,7 @@ func TestEveryWritePathCarriesTheLoopbackToken(t *testing.T) {
 		}
 	})
 	a := newFakeBackendApp(t, backend.handler)
-	a.serve.token = "test-token"
+	a.serve.tokens = serve.NewTokens("test-token")
 
 	if _, err := a.NewSession("proj", "hello"); err != nil {
 		t.Fatalf("NewSession: %v", err)
@@ -115,7 +116,7 @@ func TestPluginConsentWritesCarryTheLoopbackToken(t *testing.T) {
 		_, _ = w.Write([]byte(`{"view":{"name":"p"},"pending_convergence":false}`))
 	})
 	a := newFakeBackendApp(t, backend.handler)
-	a.serve.token = "test-token"
+	a.serve.tokens = serve.NewTokens("test-token")
 
 	if _, err := a.GrantPlugin("p", []string{"log"}, nil, nil, nil); err != nil {
 		t.Fatalf("GrantPlugin: %v", err)
