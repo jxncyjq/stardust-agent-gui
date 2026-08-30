@@ -10,7 +10,7 @@ export interface EditingAgent {
 // RightView selects which panel fills the right column: status tabs, the
 // read-only agent browser view, the HTML preview, or the workspace file
 // browser.
-export type RightView = 'status' | 'browser' | 'preview' | 'files'
+export type RightView = 'status' | 'preview' | 'files'
 
 // uiStore holds cross-panel UI flags. settingsOpen drives the settings modal,
 // toggled from the sidebar gear and consumed by App. editingAgent drives the
@@ -33,6 +33,13 @@ interface UIState {
   closePlugins: () => void
   rightView: RightView
   setRightView: (v: RightView) => void
+  // browserPanelOpen 决定那条浏览器栏在不在。
+  //
+  // 它是**用户的意愿**，与「有没有会话」是两回事：没有会话时栏本来就不存在；有会话
+  // 而用户把它收起来了，就该一直收着，直到他自己打开——或者 Agent 开了一个**新的**
+  // 会话（那时他多半想看，见 App 里的处理）。
+  browserPanelOpen: boolean
+  setBrowserPanelOpen: (open: boolean) => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -50,4 +57,6 @@ export const useUIStore = create<UIState>((set) => ({
   closePlugins: () => set({ pluginsOpen: false }),
   rightView: 'status',
   setRightView: (v) => set({ rightView: v }),
+  browserPanelOpen: true,
+  setBrowserPanelOpen: (open) => set({ browserPanelOpen: open }),
 }))
