@@ -10,6 +10,8 @@ export function BrowserNavigate(arg1:string,arg2:string,arg3:string):Promise<voi
 
 export function BrowserSessionInfo(arg1:string):Promise<string>;
 
+export function BrowserSessions(arg1:string):Promise<string>;
+
 export function BrowserSetViewport(arg1:string,arg2:number,arg3:number):Promise<void>;
 
 export function BrowserTakeover(arg1:string,arg2:boolean):Promise<void>;

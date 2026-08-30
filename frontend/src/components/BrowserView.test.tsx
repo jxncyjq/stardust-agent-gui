@@ -16,6 +16,10 @@ vi.mock('../../wailsjs/go/main/App', () => ({
   BrowserSessionInfo: () =>
     Promise.resolve(JSON.stringify({ session_id: 's1', url: '', takeover: false, has_page: true })),
   BrowserNavigate: () => Promise.resolve(),
+  // 标签条随视图一起挂载；它自身的行为在 BrowserTabs.test.tsx 里测，这里给一个
+  // 「只有一个会话」的答案，正好让它不渲染。
+  BrowserSessions: () =>
+    Promise.resolve(JSON.stringify({ sessions: [{ session_id: 's1', url: '', takeover: false, has_page: true }] })),
 }))
 vi.mock('../hooks/useBrowserStream', () => ({ useBrowserStream: () => {} }))
 

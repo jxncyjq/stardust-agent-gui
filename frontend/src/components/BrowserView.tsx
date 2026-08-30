@@ -13,6 +13,8 @@ import {
 } from '../lib/browserInput'
 import { BrowserSetViewport } from '../../wailsjs/go/main/App'
 import { BrowserToolbar } from './BrowserToolbar'
+import { BrowserTabs } from './BrowserTabs'
+import { useSessionStore } from '../stores/sessionStore'
 
 // BrowserView：只读展示 Agent 浏览过程；接管开时 canvas 捕获鼠标/键盘注入 Agent 会话。
 export function BrowserView() {
@@ -23,6 +25,10 @@ export function BrowserView() {
   const connected = useBrowserStore((s) => s.connected)
   const takeover = useBrowserStore((s) => s.takeover)
   const setTakeover = useBrowserStore((s) => s.setTakeover)
+  // 切标签就是切当前浏览器会话：setSession 会连带清掉帧/元素/接管态，那正是「换了
+  // 一个浏览器」该有的样子。
+  const setSession = useBrowserStore((s) => s.setSession)
+  const chatSessionId = useSessionStore((s) => s.currentSessionId)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const moveThrottle = useRef(new Throttler(25)) // ~40fps 合并 mousemove
@@ -176,6 +182,11 @@ export function BrowserView() {
 
   return (
     <div className="flex h-full flex-col gap-2 p-2">
+      <BrowserTabs
+        chatSessionId={chatSessionId ?? ''}
+        activeSessionId={sessionId}
+        onSelect={setSession}
+      />
       <BrowserToolbar sessionId={sessionId} takeover={takeover} connected={connected} />
       <div className="flex items-center gap-2 text-xs">
         <span className="truncate text-muted-foreground">session {sessionId}</span>
