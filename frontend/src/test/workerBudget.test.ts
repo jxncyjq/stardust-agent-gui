@@ -1,6 +1,4 @@
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 
 // 这条测试钉住的是一个**容易被当成多余而删掉**的设置。
 //
@@ -12,9 +10,13 @@ import { resolve } from 'node:path'
 // 读配置文件的**文本**而不是 import 它：在 jsdom 环境里 import vite.config.ts 会把
 // vite 自己的运行时拖进来并炸在 TextEncoder 上。这里要断言的只是「那个上限还在」，
 // 文本足够。
+//
+// 用 Vite 的 ?raw 而不是 node:fs：这个 tsconfig 没有 node 的类型，引 node:fs 会让
+// tsc --noEmit 红——一条为了防止「测试没跑」而加的测试，自己把类型检查搞红是说不
+// 过去的。
 describe('vitest worker budget', () => {
-  it('caps the number of parallel test workers', () => {
-    const source = readFileSync(resolve(__dirname, '../../vite.config.ts'), 'utf8')
+  it('caps the number of parallel test workers', async () => {
+    const source = (await import('../../vite.config.ts?raw')).default
     const match = source.match(/maxWorkers:\s*(\d+)/)
 
     expect(match, 'vite.config.ts no longer caps maxWorkers; unbounded workers crash ~60% of runs').not.toBeNull()
