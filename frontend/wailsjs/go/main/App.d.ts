@@ -16,6 +16,8 @@ export function BrowserSetViewport(arg1:string,arg2:number,arg3:number):Promise<
 
 export function BrowserTakeover(arg1:string,arg2:boolean):Promise<void>;
 
+export function BundledChromiumPath():Promise<string>;
+
 export function DecideApproval(arg1:string,arg2:string,arg3:string):Promise<void>;
 
 export function DeleteProject(arg1:string):Promise<void>;
@@ -45,6 +47,8 @@ export function GetTaskResult(arg1:string):Promise<Record<string, any>>;
 export function GrantPlugin(arg1:string,arg2:Array<string>,arg3:Array<string>,arg4:Array<string>,arg5:Array<string>):Promise<main.ConsentResultDTO>;
 
 export function HandoffTask(arg1:string,arg2:string,arg3:string):Promise<void>;
+
+export function InstallBundledChromium():Promise<void>;
 
 export function InterruptTask(arg1:string):Promise<void>;
 

@@ -30,6 +30,10 @@ export function BrowserTakeover(arg1, arg2) {
   return window['go']['main']['App']['BrowserTakeover'](arg1, arg2);
 }
 
+export function BundledChromiumPath() {
+  return window['go']['main']['App']['BundledChromiumPath']();
+}
+
 export function DecideApproval(arg1, arg2, arg3) {
   return window['go']['main']['App']['DecideApproval'](arg1, arg2, arg3);
 }
@@ -88,6 +92,10 @@ export function GrantPlugin(arg1, arg2, arg3, arg4, arg5) {
 
 export function HandoffTask(arg1, arg2, arg3) {
   return window['go']['main']['App']['HandoffTask'](arg1, arg2, arg3);
+}
+
+export function InstallBundledChromium() {
+  return window['go']['main']['App']['InstallBundledChromium']();
 }
 
 export function InterruptTask(arg1) {
