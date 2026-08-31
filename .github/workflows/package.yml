@@ -54,9 +54,18 @@ jobs:
       - name: Install the wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
+      # Linux 上要显式指定 webkit2_41：wails 默认按 webkit2gtk-4.0 拼 pkg-config，
+      # 而 Ubuntu 24.04 只有 4.1（探针实测：Package 'webkit2gtk-4.0' … not found，
+      # 前端都编完了才在链接这一步倒下）。
       - name: Build
         working-directory: legionAgentGUI
-        run: wails build -clean
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            wails build -clean -tags webkit2_41
+          else
+            wails build -clean
+          fi
 
       - name: Show what came out
         working-directory: legionAgentGUI
