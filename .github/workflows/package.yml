@@ -1,0 +1,73 @@
+name: Package
+
+# 三平台打包此前**从没跑过**：这个仓一条 CI 都没有，`wails build` 只在一台 Windows
+# 开发机上成功过。打包是交付物本身，而「它在别的平台上还能不能打出来」不该等到要发版
+# 的那天才知道。
+#
+# 这一版是探针：先让三个平台各跑一次，把真实的缺口暴露出来（Linux 的 webkit 依赖、
+# wails 版本、跨仓库的 replace 指令），再谈签名与内置 Chromium。
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    name: wails build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # 这个仓自己**建不起来**：go.mod 里有 `replace github.com/stardust/legion-agent
+      # => ../legionAgent`，指向一个兄弟目录的 checkout。所以两个仓都要拉，并且按那个
+      # 相对路径摆好——这是打包的真实前提，不是 CI 的花招。
+      - name: Check out the GUI
+        uses: actions/checkout@v4
+        with:
+          path: legionAgentGUI
+      - name: Check out the server it builds against
+        uses: actions/checkout@v4
+        with:
+          repository: jxncyjq/stardust-agent-server
+          path: legionAgent
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: legionAgentGUI/go.mod
+          cache-dependency-path: legionAgentGUI/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Wails 在 Linux 上要 GTK 与 WebKit 的开发包；runner 镜像里没有。
+      # 4.1 是 Ubuntu 24.04 上的包名（旧文档里的 4.0 在这里装不上）。
+      - name: Install the Linux WebView dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install the wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      # Linux 上要显式指定 webkit2_41：wails 默认按 webkit2gtk-4.0 拼 pkg-config，
+      # 而 Ubuntu 24.04 只有 4.1（探针实测：Package 'webkit2gtk-4.0' … not found，
+      # 前端都编完了才在链接这一步倒下）。
+      - name: Build
+        working-directory: legionAgentGUI
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Linux" ]]; then
+            wails build -clean -tags webkit2_41
+          else
+            wails build -clean
+          fi
+
+      - name: Show what came out
+        working-directory: legionAgentGUI
+        shell: bash
+        run: ls -la build/bin
