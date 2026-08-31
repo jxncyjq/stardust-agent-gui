@@ -54,18 +54,20 @@ if /i "%MODE%"=="serve" goto mode_serve
 :mode_dev
 call :assert_node || exit /b 1
 call :ensure_wails || exit /b 1
+call :ensure_workspace || exit /b 1
 echo [dev] wails dev @ %GUI% (Ctrl+C to stop)
 pushd "%GUI%"
-wails dev
+wails dev -m
 popd
 goto :eof
 
 :mode_build
 call :assert_node || exit /b 1
 call :ensure_wails || exit /b 1
+call :ensure_workspace || exit /b 1
 echo [build] wails build @ %GUI%
 pushd "%GUI%"
-wails build
+wails build -m
 popd
 if exist "%EXE%" ( echo Output: %EXE% ) else ( echo Build finished but output not found: %EXE% & exit /b 1 )
 goto :eof
@@ -74,9 +76,10 @@ goto :eof
 if not exist "%EXE%" (
     call :assert_node || exit /b 1
     call :ensure_wails || exit /b 1
+    call :ensure_workspace || exit /b 1
     echo [run] exe not found, building first...
     pushd "%GUI%"
-    wails build
+    wails build -m
     popd
 )
 echo [run] launching %EXE%
@@ -95,6 +98,37 @@ goto :eof
 
 :assert_node
 where node >nul 2>nul || ( echo Missing dependency: node. Install: https://nodejs.org/ & exit /b 1 )
+goto :eof
+
+REM The GUI cannot resolve github.com/stardust/legion-agent on its own: that module
+REM is never published, and go.mod deliberately carries no `replace` (depending on a
+REM local sibling checkout is a property of the workspace, not of the module).
+REM The workspace lives at %ROOT%\go.work, which belongs to NEITHER repo -- it spans
+REM both, so nobody can commit it. That is why this has to build it.
+REM
+REM `go work edit` runs every time on purpose: it is idempotent, and it repairs a
+REM go.work that has the two `use` lines but no replace -- that combination fails with
+REM a baffling "Repository not found", because the GUI still requires v0.0.0 and Go
+REM goes off to resolve that version itself.
+:ensure_workspace
+if not exist "%AGENT%\go.mod" (
+    echo Missing sibling checkout: %AGENT%
+    echo   Check out github.com/jxncyjq/stardust-agent-server there, next to this repo.
+    exit /b 1
+)
+REM GOWORK=off is not decoration: `go work init` searches ANCESTOR directories and
+REM refuses with "<ancestor>\go.work already exists" if it finds one up there --
+REM which is exactly the case when an outer editor-only workspace exists. Turning
+REM the search off makes init do what its name says: create one HERE.
+if not exist "%ROOT%\go.work" (
+    echo [workspace] creating %ROOT%\go.work
+    pushd "%ROOT%"
+    set "GOWORK=off"
+    go work init ./legionAgent ./legionAgentGUI || ( set "GOWORK=" ^& popd ^& exit /b 1 )
+    set "GOWORK="
+    popd
+)
+go work edit -replace=github.com/stardust/legion-agent@v0.0.0=./legionAgent "%ROOT%\go.work" || exit /b 1
 goto :eof
 
 :ensure_wails
