@@ -71,3 +71,18 @@ jobs:
         working-directory: legionAgentGUI
         shell: bash
         run: ls -la build/bin
+
+      # 内置浏览器**不打进安装包**（每平台 150–200MB，每次发版重发一遍），改成随包
+      # 带一份安装脚本。于是新的风险是：脚本装的位置与运行时找的位置**各写各的**，
+      # 装了也白装——运行时找不到就静悄悄退到系统浏览器，没有任何症状。
+      #
+      # 所以这里端到端对一次：跑脚本装，然后让**运行时自己**报告它找没找到。
+      - name: Print the pinned archive digest
+        working-directory: legionAgentGUI
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            powershell -ExecutionPolicy Bypass -File scripts/install-chromium.ps1 -PrintDigest
+          else
+            bash scripts/install-chromium.sh --print-digest
+          fi
