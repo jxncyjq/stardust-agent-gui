@@ -1,4 +1,4 @@
-# 把这次安装要用的那个固定版 Chromium 装到 App 旁边（Windows）。
+﻿# 把这次安装要用的那个固定版 Chromium 装到 App 旁边（Windows）。
 #
 # 与 install-chromium.sh 是同一件事的两个平台版本，取舍写在那边的抬头里：不把浏览器
 # 打进安装包，而是把「装什么版本」钉在 chromium-pin.json 里，安装时再取。

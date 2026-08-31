@@ -77,12 +77,24 @@ jobs:
       # 装了也白装——运行时找不到就静悄悄退到系统浏览器，没有任何症状。
       #
       # 所以这里端到端对一次：跑脚本装，然后让**运行时自己**报告它找没找到。
-      - name: Print the pinned archive digest
+      - name: Install the pinned browser next to the app
         working-directory: legionAgentGUI
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            powershell -ExecutionPolicy Bypass -File scripts/install-chromium.ps1 -PrintDigest
+            powershell -ExecutionPolicy Bypass -File scripts/install-chromium.ps1 -AppDir build/bin
           else
-            bash scripts/install-chromium.sh --print-digest
+            bash scripts/install-chromium.sh build/bin
           fi
+
+      # 让**运行时自己**回答它找没找到——脚本说「装到了 X」不算数，两边各写各的路径
+      # 正是这里唯一要防的事。wherechromium 与 GUI 共用同一份查找逻辑，并且从**自己
+      # 可执行文件的位置**算起，所以它必须被放到与 App 同一个目录里跑。
+      - name: Ask the runtime whether it can see it
+        working-directory: legionAgentGUI
+        shell: bash
+        run: |
+          go build -o build/bin/wherechromium ./cmd/wherechromium
+          found=$(./build/bin/wherechromium)
+          echo "the runtime resolved: $found"
+          "$found" --version
