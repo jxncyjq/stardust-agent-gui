@@ -70,7 +70,20 @@ appdir=$1
 
 case "$platform" in
   mac-*)
-    # macOS 上 App 的资源在 Contents/Resources/，而可执行文件在 Contents/MacOS/。
+    # macOS 上 App 的资源在 Contents/Resources/，而可执行文件在 Contents/MacOS/——
+    # 所以这里要的是 **.app 里面那个目录**，不是 .app 所在的目录。
+    #
+    # 这条不是挑剔：给成外面那层，浏览器会被装到 .app **旁边**，脚本一路成功，而
+    # App 起来之后找不到它、静悄悄退到系统浏览器。CI 上第一次跑就是这么错的，症状
+    # 正是「装完了，运行时说没有」。所以在这里就拦住，并把该给的路径说出来。
+    if compgen -G "$appdir/*.app" > /dev/null; then
+      app=$(compgen -G "$appdir/*.app" | head -1)
+      die "在 macOS 上要给 .app 里面那个目录，而不是它所在的目录。这次应该是：${app}/Contents/MacOS"
+    fi
+    case "$appdir" in
+      */Contents/MacOS|*/Contents/MacOS/) : ;;
+      *) echo "install-chromium: 提醒——$appdir 看起来不像 .app 里的 Contents/MacOS，装出来的浏览器可能不在 App 找得到的位置" >&2 ;;
+    esac
     dest="$appdir/../Resources/chromium"
     ;;
   *)
