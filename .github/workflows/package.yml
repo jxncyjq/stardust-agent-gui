@@ -22,9 +22,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      # 这个仓自己**建不起来**：go.mod 里有 `replace github.com/stardust/legion-agent
-      # => ../legionAgent`，指向一个兄弟目录的 checkout。所以两个仓都要拉，并且按那个
-      # 相对路径摆好——这是打包的真实前提，不是 CI 的花招。
+      # 这个仓自己**建不起来**：它 require 的 github.com/stardust/legion-agent 是个未发布
+      # 模块，那个地址上没有仓库可拉。go.mod 里刻意不写 replace（依赖关系属于工作区，
+      # 不属于模块本身），所以两个仓都要拉、摆成兄弟目录，再由下面那步建出工作区——
+      # 这是打包的真实前提，不是 CI 的花招。
       - name: Check out the GUI
         uses: actions/checkout@v4
         with:
@@ -34,6 +35,19 @@ jobs:
         with:
           repository: jxncyjq/stardust-agent-server
           path: legionAgent
+
+      # 本地开发靠 legion/go.work，那个文件不在任何一个仓里（它横跨两个仓，
+      # 无处安放），所以 CI 必须自己建一份等价的。
+      #
+      # 只 `use` 两个模块不够：GUI 的 go.mod 仍 `require ... v0.0.0`，Go 会去解析那个
+      # 版本号本身，于是即便工作区里已有同名模块也会尝试联网、以 "Repository not found"
+      # 失败。工作区模块的 replace 必须带版本，否则 Go 报 "replaced at all versions"。
+      - name: Wire the two checkouts into a Go workspace
+        shell: bash
+        run: |
+          go work init ./legionAgent ./legionAgentGUI
+          go work edit -replace=github.com/stardust/legion-agent@v0.0.0=./legionAgent
+          cat go.work
 
       - uses: actions/setup-go@v5
         with:
