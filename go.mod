@@ -19,7 +19,7 @@ require github.com/stardust/legion-agent v0.0.0
 //
 // 还有一个代价，实测撞到过：**`go mod tidy` 不认 workspace 的 replace**，它按单模块
 // 模式解析，照样去拉那个不存在的仓库。所以这个模块跑不了 tidy（`wails build` 要加
-// -skipmodtidy），依赖增减要手工维护本文件。
+// -m），依赖增减要手工维护本文件。
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect

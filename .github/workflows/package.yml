@@ -75,7 +75,7 @@ jobs:
       # 而 Ubuntu 24.04 只有 4.1（探针实测：Package 'webkit2gtk-4.0' … not found，
       # 前端都编完了才在链接这一步倒下）。
       #
-      # -skipmodtidy 是必需的，不是省时间：wails build 默认在生成 bindings 前跑
+      # -m（"Skip mod tidy before compile"）是必需的，不是省时间：wails build 默认跑
       # `go mod tidy`（build.go: GoModTidy: !SkipModTidy），而 **`go mod tidy` 不认
       # workspace 的 replace**——它按单模块模式解析，于是照样去拉那个不存在的仓库。
       # 本机实测同样失败。代价写在这里：只要 legion-agent 不发布，这个模块就跑不了
@@ -85,9 +85,9 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            wails build -clean -skipmodtidy -tags webkit2_41
+            wails build -clean -m -tags webkit2_41
           else
-            wails build -clean -skipmodtidy
+            wails build -clean -m
           fi
 
       - name: Show what came out
