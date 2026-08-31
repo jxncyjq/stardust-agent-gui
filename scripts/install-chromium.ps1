@@ -32,7 +32,15 @@ New-Item -ItemType Directory -Path $work | Out-Null
 try {
     $archive = Join-Path $work 'chrome.zip'
     Write-Host "==> 下载 Chrome for Testing $version（$platform）"
-    Invoke-WebRequest -Uri $entry.url -OutFile $archive -UseBasicParsing
+    # 关掉进度条：Invoke-WebRequest 每写一块就重画一次，对一个 150MB 的文件，这一项
+    # 让下载从半分钟变成半小时（CI 上实测 28 分钟）。
+    $prevProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri $entry.url -OutFile $archive -UseBasicParsing
+    } finally {
+        $ProgressPreference = $prevProgress
+    }
 
     $got = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 
@@ -69,9 +77,15 @@ try {
     $binary = Join-Path $dest 'chrome.exe'
     if (-not (Test-Path $binary)) { throw "install-chromium: 装完之后没有找到 $binary" }
 
-    Write-Host "==> 完成：$binary"
-    & $binary --version
-    if ($LASTEXITCODE -ne 0) { throw "install-chromium: 装好的浏览器跑不起来（退出码 $LASTEXITCODE）" }
+    # 不启动它来验：Windows 上 chrome.exe 是 GUI 子系统程序，--version 不往控制台
+    # 写东西、退出码也拿不到（CI 上实测 $LASTEXITCODE 是空的），而它启动时打的
+    # sandbox/crashpad 报错会让人以为装坏了。读文件自带的版本资源更直接，也顺带
+    # 确认装进去的**确实是钉住的那个版本**。
+    $installed = (Get-Item $binary).VersionInfo.ProductVersion
+    Write-Host "==> 完成：$binary（$installed）"
+    if ($installed -ne $version) {
+        throw "install-chromium: 装出来的是 $installed，而 chromium-pin.json 钉的是 $version"
+    }
 }
 finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue

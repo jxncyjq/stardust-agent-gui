@@ -112,4 +112,10 @@ jobs:
           go build -o '${{ steps.appdir.outputs.dir }}/wherechromium' ./cmd/wherechromium
           found=$('${{ steps.appdir.outputs.dir }}/wherechromium')
           echo "the runtime resolved: $found"
-          "$found" --version
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            # Windows 上 chrome.exe 是 GUI 子系统程序：--version 不往控制台写、退出码
+            # 也拿不到。读版本资源，不启动它。
+            powershell -Command "(Get-Item '$found').VersionInfo.ProductVersion"
+          else
+            "$found" --version
+          fi
