@@ -45,7 +45,10 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 archive="$work/chrome.zip"
 
-echo "==> 下载 Chrome for Testing $version（$platform）"
+# 变量后面紧跟全角标点时必须写成 ${version}：bash 3.2（macOS 自带的那个）会把多字节
+# 字符当成变量名的一部分，配合 set -u 直接死在 "unbound variable" 上，而 bash 5 不会。
+# CI 上只有 macOS 红，正是这个。
+echo "==> 下载 Chrome for Testing ${version}（${platform}）"
 curl -fsSL --retry 3 -o "$archive" "$url"
 
 if command -v sha256sum >/dev/null 2>&1; then
@@ -66,7 +69,7 @@ appdir=$1
 # 摘要缺失就拒绝安装，不是「跳过校验继续装」：一个没被校验过的浏览器会以 App 自带
 # 组件的身份运行，而它是从公网下载来的。缺摘要是 pin 文件没维护好，属于要修的事。
 [[ -n "$want" ]] || die "chromium-pin.json 里 $platform 没有 sha256。先跑一次 --print-digest，把打印出来的摘要填回去再装。"
-[[ "$got" == "$want" ]] || die "摘要不符：期望 $want，实际 $got。要么 pin 文件过期了，要么这次下载不可信——两种都不该继续装。"
+[[ "$got" == "$want" ]] || die "摘要不符：期望 ${want}，实际 ${got}。要么 pin 文件过期了，要么这次下载不可信——两种都不该继续装。"
 
 case "$platform" in
   mac-*)
