@@ -71,3 +71,51 @@ jobs:
         working-directory: legionAgentGUI
         shell: bash
         run: ls -la build/bin
+
+      # 内置浏览器**不打进安装包**（每平台 150–200MB，每次发版重发一遍），改成随包
+      # 带一份安装脚本。于是新的风险是：脚本装的位置与运行时找的位置**各写各的**，
+      # 装了也白装——运行时找不到就静悄悄退到系统浏览器，没有任何症状。
+      #
+      # 所以这里端到端对一次：跑脚本装，然后让**运行时自己**报告它找没找到。
+      # 「App 的可执行文件在哪个目录」三个平台不一样，而这正是要端到端验的东西：
+      # macOS 上它在 .app/Contents/MacOS/ 里，给成 build/bin 会把浏览器装到 .app
+      # 旁边——脚本一路成功，App 起来却找不到（CI 第一次跑就是这么错的）。
+      - name: Locate the app executable directory
+        id: appdir
+        working-directory: legionAgentGUI
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            app=$(ls -d build/bin/*.app | head -1)
+            echo "dir=$app/Contents/MacOS" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=build/bin" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install the pinned browser next to the app
+        working-directory: legionAgentGUI
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            powershell -ExecutionPolicy Bypass -File scripts/install-chromium.ps1 -AppDir '${{ steps.appdir.outputs.dir }}'
+          else
+            bash scripts/install-chromium.sh '${{ steps.appdir.outputs.dir }}'
+          fi
+
+      # 让**运行时自己**回答它找没找到——脚本说「装到了 X」不算数，两边各写各的路径
+      # 正是这里唯一要防的事。wherechromium 与 GUI 共用同一份查找逻辑，并且从**自己
+      # 可执行文件的位置**算起，所以它必须被放到与 App 同一个目录里跑。
+      - name: Ask the runtime whether it can see it
+        working-directory: legionAgentGUI
+        shell: bash
+        run: |
+          go build -o '${{ steps.appdir.outputs.dir }}/wherechromium' ./cmd/wherechromium
+          found=$('${{ steps.appdir.outputs.dir }}/wherechromium')
+          echo "the runtime resolved: $found"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            # Windows 上 chrome.exe 是 GUI 子系统程序：--version 不往控制台写、退出码
+            # 也拿不到。读版本资源，不启动它。
+            powershell -Command "(Get-Item '$found').VersionInfo.ProductVersion"
+          else
+            "$found" --version
+          fi

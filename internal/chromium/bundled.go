@@ -1,4 +1,4 @@
-package main
+package chromium
 
 import (
 	"os"
@@ -18,10 +18,13 @@ import (
 //
 // 每个平台给的是一串候选而不是一个：打包脚本可能把浏览器放在 Chromium.app 里，也
 // 可能是裸的可执行文件，先找到哪个算哪个。
-func bundledChromiumRelativePaths() []string {
+// RelativePaths 见包注释。
+func RelativePaths() []string {
 	switch runtime.GOOS {
 	case "darwin":
 		return []string{
+			// Chrome for Testing 的包名（scripts/install-chromium.sh 装的就是它）。
+			"../Resources/chromium/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
 			"../Resources/chromium/Chromium.app/Contents/MacOS/Chromium",
 			"../Resources/chromium/chrome",
 		}
@@ -42,7 +45,8 @@ func bundledChromiumRelativePaths() []string {
 // 它只返回**确实存在**的路径。返回一个不存在的路径会让内置这一级悄悄接管：
 // resolveChromiumBin 对 BundledPath 做存在性检查，但把「找不到」和「没带」混在
 // 一起，会让下一个人以为这台机器上装的浏览器坏了。
-func bundledChromiumPath() string {
+// Path 见包注释。
+func Path() string {
 	exe, err := os.Executable()
 	if err != nil {
 		// 拿不到自己的路径就无从算起。这不是能兜的事，也不该让 App 起不来：
@@ -53,7 +57,7 @@ func bundledChromiumPath() string {
 		exe = resolved
 	}
 	dir := filepath.Dir(exe)
-	for _, rel := range bundledChromiumRelativePaths() {
+	for _, rel := range RelativePaths() {
 		candidate := filepath.Clean(filepath.Join(dir, rel))
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate

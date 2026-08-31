@@ -11,6 +11,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/stardust/legion-agent/serve"
+
+	"legionAgentGUI/internal/chromium"
 )
 
 type ServeManager struct {
@@ -66,7 +68,7 @@ func serveOptions(configPath string) serve.Options {
 		// 这次安装自带的 Chromium（没带就是空）。配置文件说不出这个路径：它随安装
 		// 位置变，只有跑起来的宿主算得出来。配置里显式指名的浏览器优先，见
 		// cli.applyEmbedderBundle。
-		BundledChromiumPath: bundledChromiumPath(),
+		BundledChromiumPath: chromium.Path(),
 	}
 }
 
