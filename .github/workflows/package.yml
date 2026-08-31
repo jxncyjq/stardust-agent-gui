@@ -22,9 +22,10 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      # 这个仓自己**建不起来**：go.mod 里有 `replace github.com/stardust/legion-agent
-      # => ../legionAgent`，指向一个兄弟目录的 checkout。所以两个仓都要拉，并且按那个
-      # 相对路径摆好——这是打包的真实前提，不是 CI 的花招。
+      # 这个仓自己**建不起来**：它 require 的 github.com/stardust/legion-agent 是个未发布
+      # 模块，那个地址上没有仓库可拉。go.mod 里刻意不写 replace（依赖关系属于工作区，
+      # 不属于模块本身），所以两个仓都要拉、摆成兄弟目录，再由下面那步建出工作区——
+      # 这是打包的真实前提，不是 CI 的花招。
       - name: Check out the GUI
         uses: actions/checkout@v4
         with:
@@ -39,6 +40,22 @@ jobs:
         with:
           go-version-file: legionAgentGUI/go.mod
           cache-dependency-path: legionAgentGUI/go.sum
+      # 本地开发靠 legion/go.work，那个文件不在任何一个仓里（它横跨两个仓，
+      # 无处安放），所以 CI 必须自己建一份等价的。
+      #
+      # 必须排在 setup-go **之后**：macOS runner 镜像不预装 go（Linux/Windows 预装，
+      # 所以这个顺序错只在 macOS 上炸，`go: command not found`）。
+      #
+      # 只 `use` 两个模块不够：GUI 的 go.mod 仍 `require ... v0.0.0`，Go 会去解析那个
+      # 版本号本身，于是即便工作区里已有同名模块也会尝试联网、以 "Repository not found"
+      # 失败。工作区模块的 replace 必须带版本，否则 Go 报 "replaced at all versions"。
+      - name: Wire the two checkouts into a Go workspace
+        shell: bash
+        run: |
+          go work init ./legionAgent ./legionAgentGUI
+          go work edit -replace=github.com/stardust/legion-agent@v0.0.0=./legionAgent
+          cat go.work
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -57,14 +74,20 @@ jobs:
       # Linux 上要显式指定 webkit2_41：wails 默认按 webkit2gtk-4.0 拼 pkg-config，
       # 而 Ubuntu 24.04 只有 4.1（探针实测：Package 'webkit2gtk-4.0' … not found，
       # 前端都编完了才在链接这一步倒下）。
+      #
+      # -m（"Skip mod tidy before compile"）是必需的，不是省时间：wails build 默认跑
+      # `go mod tidy`（build.go: GoModTidy: !SkipModTidy），而 **`go mod tidy` 不认
+      # workspace 的 replace**——它按单模块模式解析，于是照样去拉那个不存在的仓库。
+      # 本机实测同样失败。代价写在这里：只要 legion-agent 不发布，这个模块就跑不了
+      # `go mod tidy`，依赖增减要手工维护 go.mod。
       - name: Build
         working-directory: legionAgentGUI
         shell: bash
         run: |
           if [[ "${{ runner.os }}" == "Linux" ]]; then
-            wails build -clean -tags webkit2_41
+            wails build -clean -m -tags webkit2_41
           else
-            wails build -clean
+            wails build -clean -m
           fi
 
       - name: Show what came out

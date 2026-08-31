@@ -6,10 +6,20 @@ require github.com/wailsapp/wails/v2 v2.12.0
 
 require github.com/stardust/legion-agent v0.0.0
 
-// legion-agent is an unpublished sibling module; resolve it from the local
-// path. The go.work workspace also wires it, but the replace keeps `go build`
-// fully offline and unambiguous.
-replace github.com/stardust/legion-agent => ../legionAgent
+// legion-agent is an unpublished sibling module: there is no such repository at
+// github.com/stardust/legion-agent to fetch. It is resolved ONLY by a Go
+// workspace that has both modules in `use` (legion/go.work, and the editor-only
+// one at the outer root) — this module deliberately carries no `replace`.
+//
+// The consequence is load-bearing, so it is written here rather than learned the
+// hard way: building this module WITHOUT an active workspace fails at module
+// resolution, not at compile time. Anything that builds it — CI, a fresh clone,
+// `GOWORK=off` — must first put both checkouts into a workspace
+// (`go work init ./legionAgent ./legionAgentGUI`)。
+//
+// 还有一个代价，实测撞到过：**`go mod tidy` 不认 workspace 的 replace**，它按单模块
+// 模式解析，照样去拉那个不存在的仓库。所以这个模块跑不了 tidy（`wails build` 要加
+// -m），依赖增减要手工维护本文件。
 
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
