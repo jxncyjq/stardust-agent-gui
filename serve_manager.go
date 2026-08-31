@@ -45,17 +45,13 @@ type ServeManager struct {
 	emit func(ctx context.Context, event string, data ...any)
 }
 
-func NewServeManager() *ServeManager {
-	return &ServeManager{emit: runtime.EventsEmit}
-}
-
-// Start launches the legion-agent HTTP service in-process.
-// It picks a random port since ServeOptions.Addr is "127.0.0.1:0".
-func (m *ServeManager) Start(appCtx context.Context, configPath string) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancel = cancel
-
-	result, err := serve.BuildService(ctx, serve.Options{
+// serveOptions 是这个宿主交给 serve 的那组参数。
+//
+// 单独一个函数，是因为其中两项**只在装配时生效、错了没有任何症状**：加固开关关掉了
+// 就是「界面能看、什么都做不了」之前的那个全开的 serve；内置浏览器路径漏了，浏览器
+// 照常起来，只是用的是另一个 Chromium。两者都要能被直接断言。
+func serveOptions(configPath string) serve.Options {
+	return serve.Options{
 		ConfigPath: configPath,
 		Addr:       "127.0.0.1:0",
 		// Ask for the bearer token explicitly. The serve used to INFER
@@ -67,7 +63,24 @@ func (m *ServeManager) Start(appCtx context.Context, configPath string) error {
 		// token is captured below and attached by the App's HTTP transport and
 		// both SSE bridges.
 		LoopbackHardening: true,
-	})
+		// 这次安装自带的 Chromium（没带就是空）。配置文件说不出这个路径：它随安装
+		// 位置变，只有跑起来的宿主算得出来。配置里显式指名的浏览器优先，见
+		// cli.applyEmbedderBundle。
+		BundledChromiumPath: bundledChromiumPath(),
+	}
+}
+
+func NewServeManager() *ServeManager {
+	return &ServeManager{emit: runtime.EventsEmit}
+}
+
+// Start launches the legion-agent HTTP service in-process.
+// It picks a random port since ServeOptions.Addr is "127.0.0.1:0".
+func (m *ServeManager) Start(appCtx context.Context, configPath string) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+
+	result, err := serve.BuildService(ctx, serveOptions(configPath))
 	if err != nil {
 		cancel()
 		// Reset port/token so a downed serve does not report the previous
