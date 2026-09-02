@@ -76,6 +76,41 @@ describe('TrajectoryCell', () => {
     expect(screen.getByText(/content 字段缺失或类型不对/)).toBeInTheDocument()
   })
 
+  // tool/call 的 name/arguments 也是 fail-loud 守卫，此前没有测试断言过
+  // （见 task-4-review.md Important-2：M7 变异删掉相邻的 preview/is_error 守卫后
+  // 全绿，说明这一片守卫此前完全没被测试盯住）。
+  it('tool/call 缺 name 或 arguments 类型不对时标为坏数据', () => {
+    const { unmount } = render(<TrajectoryCell event={ev('tool/call', { call_id: 'c1' })} sessionID="sess-1" />)
+    expect(screen.getByText(/name 字段缺失或类型不对/)).toBeInTheDocument()
+    unmount()
+
+    render(<TrajectoryCell event={ev('tool/call', { name: 'read_file', call_id: 'c1', arguments: 123 })} sessionID="sess-1" />)
+    expect(screen.getByText(/arguments 字段缺失或类型不对/)).toBeInTheDocument()
+  })
+
+  // preview 缺席时不能悄悄渲染成一个只有 RESULT 徽章的空行——那和契约②要避免的
+  // 「空白行看起来像 bug」是同一个病。
+  it('tool/result 缺 preview 字段时标为坏数据', () => {
+    render(<TrajectoryCell event={ev('tool/result', { call_id: 'c1', is_error: false })} sessionID="sess-1" />)
+    expect(screen.getByText(/preview 字段缺失或类型不对/)).toBeInTheDocument()
+  })
+
+  // is_error 不是布尔值（比如字符串 "false"）不能被当成「没出错」悄悄放过。
+  it('tool/result 的 is_error 不是布尔值时标为坏数据', () => {
+    render(<TrajectoryCell event={ev('tool/result', { call_id: 'c1', preview: 'ok', is_error: 'false' })} sessionID="sess-1" />)
+    expect(screen.getByText(/is_error 字段缺失或类型不对/)).toBeInTheDocument()
+  })
+
+  // user/message 的空正文当前判为坏数据（「空的用户消息不会产生一轮」，报告 §6.3
+  // 自陈存疑，task-4-review.md Important-3 指出这个假设无 server 契约实锤，且与
+  // assistant/message 把空串当合法可选不对称）。这条测试不对判断本身背书，只是把
+  // *当前*行为钉住：谁要把这条对齐成 assistant 的「（无正文）」路线，必须先让这条
+  // 测试连同判断一起改掉，而不是在改别处时顺手带跑。
+  it('user/message 空正文按当前判断标为坏数据（判断存疑，见 task-4-review.md Important-3）', () => {
+    render(<TrajectoryCell event={ev('user/message', { content: '' })} sessionID="sess-1" />)
+    expect(screen.getByText(/content 字段缺失或类型不对/)).toBeInTheDocument()
+  })
+
   it('turn/end 渲染成边界行并带上原因', () => {
     render(<TrajectoryCell event={ev('turn/end', { reason: 'completed' })} sessionID="sess-1" />)
     expect(screen.getByText(/turn\/end/)).toBeInTheDocument()

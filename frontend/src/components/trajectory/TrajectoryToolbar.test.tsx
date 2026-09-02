@@ -3,12 +3,17 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { TrajectoryToolbar } from './TrajectoryToolbar'
 
+// 含一条 tool/result：Calls 只应数 tool/call，不能把 tool/call 的回执也数进去
+// （TrajectoryTimeline 的 Tools 带子才是两类都收，Toolbar 的 Calls 口径不同，
+// 这条夹具专门用来把两套口径的差异钉住——见 task-4-review.md Important-1）。
+// 插在 turn/end 之前，不改变首尾事件的时间戳，Duration 断言不受影响。
 const events = [
   { seq: 0, type: 'turn/start', time: '2026-09-02T00:00:00Z', data: { turn: 0 } },
   { seq: 1, type: 'user/message', time: '2026-09-02T00:00:01Z', data: { turn: 0, content: 'x' } },
   { seq: 2, type: 'tool/call', time: '2026-09-02T00:00:02Z', data: { turn: 0, name: 'read_file', call_id: 'c1' } },
   { seq: 3, type: 'tool/call', time: '2026-09-02T00:00:03Z', data: { turn: 0, name: 'write_file', call_id: 'c2' } },
-  { seq: 4, type: 'turn/end', time: '2026-09-02T00:00:10Z', data: { turn: 0, reason: 'completed' } },
+  { seq: 4, type: 'tool/result', time: '2026-09-02T00:00:04Z', data: { turn: 0, call_id: 'c1', preview: 'ok', is_error: false } },
+  { seq: 5, type: 'turn/end', time: '2026-09-02T00:00:10Z', data: { turn: 0, reason: 'completed' } },
 ]
 
 describe('TrajectoryToolbar', () => {
