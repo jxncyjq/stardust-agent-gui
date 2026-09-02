@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -332,6 +333,94 @@ func TestConsumeSSEDoesNotPutOtherEventsOnThePluginChannel(t *testing.T) {
 	for _, e := range collectSSE(t, srv.URL) {
 		if e.event == "agent:plugin" {
 			t.Errorf("agent:plugin emitted for a non-plugin frame: %+v", e)
+		}
+	}
+}
+
+// TestSessionEventsGetTheirOwnChannel:
+// session_event 必须走专用频道。通用 agent:event 频道每个流式 token 一条，
+// 轨迹订它等于模型每吐一个字就唤醒一次面板——approval/browser/plugin 都因此
+// 有了专用频道（见 sse_bridge.go 里那段注释），session_event 同理。
+func TestSessionEventsGetTheirOwnChannel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		frames := []string{
+			"event: session_event\ndata: {\"session_id\":\"sess-1\",\"seq\":7,\"event_type\":\"tool/call\"}\n\n",
+			"event: task.completed\ndata: {\"task_id\":\"task-1\"}\n\n",
+		}
+		for _, f := range frames {
+			fmt.Fprint(w, f)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	}))
+	defer srv.Close()
+
+	type emitted struct {
+		event string
+		data  any
+	}
+	var got []emitted
+	emit := func(event string, data any) {
+		got = append(got, emitted{event: event, data: data})
+	}
+
+	if err := consumeSSE(context.Background(), srv.URL, emit); err == nil {
+		t.Fatal("consumeSSE 返回了 nil error；流结束时应当带上原因")
+	}
+
+	// 1) 专用频道收到了它，data 是原始 JSON 字符串（与其它专用频道一致）。
+	var dedicated []emitted
+	for _, e := range got {
+		if e.event == "agent:session_event" {
+			dedicated = append(dedicated, e)
+		}
+	}
+	if len(dedicated) != 1 {
+		t.Fatalf("agent:session_event 收到 %d 条，要 1 条：轨迹订的就是这条频道，没有它就永远不会实时更新", len(dedicated))
+	}
+	payload, ok := dedicated[0].data.(map[string]any)
+	if !ok {
+		t.Fatalf("payload 类型 %T，要 map[string]any", dedicated[0].data)
+	}
+	if payload["type"] != "session_event" {
+		t.Errorf("payload type = %v，要 session_event", payload["type"])
+	}
+	raw, ok := payload["data"].(string)
+	if !ok || !strings.Contains(raw, `"seq":7`) {
+		t.Errorf("payload data = %v，要原样转发含 seq 的 JSON 字符串", payload["data"])
+	}
+
+	// 2) 通用频道**也**收到了它——既有契约：agent:event 是全量的，
+	//    专用频道是它的旁路而不是替代。
+	generic := 0
+	for _, e := range got {
+		if e.event == "agent:event" {
+			generic++
+		}
+	}
+	if generic != 2 {
+		t.Errorf("agent:event 收到 %d 条，要 2 条（session_event 与 task.completed 都该在全量频道里）", generic)
+	}
+}
+
+// TestSessionEventsDoNotPutOtherEventsOnTheirChannel 是频道有用的另一半：
+// 非 session_event 的帧（尤其是每个 delta 一条的 token 流）不得落到轨迹频道上，
+// 否则专用频道就退化成了第二个 firehose。
+func TestSessionEventsDoNotPutOtherEventsOnTheirChannel(t *testing.T) {
+	srv := sseServer(t,
+		"event: runtime.token\ndata: {\"task_id\":\"t1\",\"message\":\"hel\"}\n\n",
+		"event: task_completed\ndata: {\"task_id\":\"t1\"}\n\n",
+		"event: session_eventish\ndata: {\"message\":\"not a session event\"}\n\n",
+	)
+	defer srv.Close()
+
+	for _, e := range collectSSE(t, srv.URL) {
+		if e.event == "agent:session_event" {
+			t.Errorf("agent:session_event emitted for a non-session-event frame: %+v", e)
 		}
 	}
 }
