@@ -12,6 +12,10 @@ interface TrajectoryTableProps {
  *
  * 空列表说明「这条会话还没有轨迹」，而不是留一片空白：空白既可能是没事件，也可能是
  * 取数挂了，看的人分不出来。
+ *
+ * **这句文案只对「取数成功但一条都没有」成立。** 取数失败时它就是在说谎（把「没拿到」
+ * 说成「没有」），所以那种情况根本不该走到这里——`TrajectoryView` 在 store 的 `error`
+ * 非空时另说一句话，不把渲染交给本组件。
  */
 export function TrajectoryTable({ turns, sessionID }: TrajectoryTableProps) {
   if (turns.length === 0) {

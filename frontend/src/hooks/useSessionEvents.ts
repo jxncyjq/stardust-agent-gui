@@ -6,6 +6,28 @@ import { useTrajectoryStore, type SessionEvent } from '../stores/trajectoryStore
 /** 一页拉多少条。spec §7 定了「虚拟滚动先不做，靠 limit 分页压住每屏事件数」。 */
 const PAGE_LIMIT = 500
 
+/** 失败说明在界面上占的最大长度：错误体可能是整段 JSON，别让它把面板撑爆。 */
+const REASON_MAX = 300
+
+/** describeFailure 把抛出来的东西压成一句给人看的话（原样的对象在界面上是 [object Object]）。 */
+function describeFailure(detail: unknown): string {
+  const text =
+    detail instanceof Error
+      ? detail.message
+      : typeof detail === 'string'
+        ? detail
+        : safeStringify(detail)
+  return text.length > REASON_MAX ? `${text.slice(0, REASON_MAX)}…` : text
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
 /**
  * useSessionEvents 把一条会话的事件喂给轨迹 store。
  *
@@ -30,6 +52,22 @@ export function useSessionEvents(sessionID: string | null) {
     if (!sessionID) return
     let cancelled = false
 
+    /**
+     * fail 是取数路径上**唯一**的失败出口：控制台留一份给排查者，store 留一份给用户。
+     *
+     * 只写 console.error 是不够的——Wails 生产构建里用户看不到 devtools 控制台，
+     * 那份记录对他等于不存在，界面上剩下的只有一个空列表，与「这条会话真的没有事件」
+     * 长得一模一样。绑定为区分 404 与空列表专门加了 apiGetStatusChecked，这里必须
+     * 把那个区分一路带到界面上。
+     */
+    const fail = (what: string, detail: unknown) => {
+      console.error(`${what}:`, detail)
+      // 已经切走的会话不再改 store：新会话刚 reset 过，这里写进去就成了挂在别人
+      // 头上的错误。日志仍然留着——失败不因为用户切走而消失。
+      if (cancelled) return
+      useTrajectoryStore.getState().setError(`${what}：${describeFailure(detail)}`)
+    }
+
     const pull = async (fromSeq: number) => {
       try {
         const page = await GetSessionEvents(sessionID, fromSeq, PAGE_LIMIT)
@@ -38,7 +76,16 @@ export function useSessionEvents(sessionID: string | null) {
         // 但它是别的类型就是坏数据——照原样塞进 store 会让轨迹视图炸在渲染里。
         const events = (page?.events ?? []) as SessionEvent[]
         if (!Array.isArray(events)) {
-          console.error(`会话 ${sessionID} 的事件页 events 不是数组:`, page)
+          fail(`会话 ${sessionID} 的事件页 events 不是数组`, page)
+          return
+        }
+        // 每条事件的 seq 是 store 的主键：分页去重、连续性判定、缺口标记全靠它。
+        // 缺席或不是数字时 mergeBySeq 会把这些条目折叠到 undefined 一个键上、连续性
+        // 判定得 NaN、gapDetected 静静变 true——坏数据无声地改写 store 状态。
+        // server 侧 seq 是必给的 int64，所以这条路径现实中不可达；但只要将来多一个
+        // 数据源（离线导入、别的端点），它就可达，而那时的症状会是「事件莫名消失」。
+        if (events.some((e) => typeof e?.seq !== 'number' || !Number.isFinite(e.seq))) {
+          fail(`会话 ${sessionID} 的事件页里有条目缺少 seq`, page)
           return
         }
         // next_seq 是端点契约里必给的续读点（截断时指向被截掉的第一条）。它缺席
@@ -46,15 +93,15 @@ export function useSessionEvents(sessionID: string | null) {
         // 错的位置开始，静静地漏事件。
         const nextSeq = Number(page?.next_seq)
         if (!Number.isFinite(nextSeq)) {
-          console.error(`会话 ${sessionID} 的事件页缺少 next_seq:`, page)
+          fail(`会话 ${sessionID} 的事件页缺少 next_seq`, page)
           return
         }
         useTrajectoryStore.getState().loadPage(events, nextSeq)
       } catch (err) {
-        // 拉不到就是拉不到：记录并停在原地，让下一帧再触发一次。
+        // 拉不到就是拉不到：记录、写进 store、停在原地，让下一帧再触发一次。
         // 不要把它吞成「这条会话没有事件」——那是 fail-loud 铁律禁止的零值假装正常。
         // （绑定对 404 会抛错，正是为了让这里区分「会话不存在」与「空列表」。）
-        console.error(`加载会话 ${sessionID} 的事件失败:`, err)
+        fail(`加载会话 ${sessionID} 的事件失败`, err)
       }
     }
 

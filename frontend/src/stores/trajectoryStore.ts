@@ -25,8 +25,20 @@ interface TrajectoryState {
    * 发现缺口就回端点从断点补拉，而不是猜中间是什么。
    */
   gapDetected: boolean
+  /**
+   * error 是「这批数据没能取到」的说明，null 表示取数一切正常。
+   *
+   * 它存在的唯一理由：**空的 events 有两种截然不同的含义**——这条会话真的还没有
+   * 事件，或者取数失败了（会话不存在、绑定报错、响应是坏数据）。绑定为此专门用
+   * `apiGetStatusChecked` 把 404 与空列表分开，若 store 只留一个空数组，这个区分
+   * 就在最后一层被抹掉，界面会把失败说成「这条会话还没有轨迹」——正是 fail-loud
+   * 铁律禁止的「零值假装正常」。
+   */
+  error: string | null
   loadPage: (events: SessionEvent[], nextSeq: number) => void
   appendFromFrame: (sessionID: string, seq: number) => void
+  /** setError 记下取数失败的说明，供界面显示；它不清空已加载的事件（拿到手的仍然有效）。 */
+  setError: (message: string) => void
   reset: () => void
 }
 
@@ -59,13 +71,15 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
   turns: [],
   nextSeq: 0,
   gapDetected: false,
+  error: null,
 
   loadPage: (incoming, nextSeq) => {
     const events = mergeBySeq(get().events, incoming)
     // 补完之后重新判定缺口：seq 从 0 起连续（P1 的不变量），所以
     // 「最后一条的 seq + 1 === 条数」等价于「没有洞」。
     const contiguous = events.length === 0 || events[events.length - 1].seq + 1 === events.length
-    set({ events, turns: groupByTurn(events), nextSeq, gapDetected: !contiguous })
+    // 这一页真的到手了，上一次失败的说明就不该继续挂在界面上。
+    set({ events, turns: groupByTurn(events), nextSeq, gapDetected: !contiguous, error: null })
   },
 
   appendFromFrame: (_sessionID, seq) => {
@@ -81,5 +95,7 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
     // 由调用方拉取后经 loadPage 进来。
   },
 
-  reset: () => set({ events: [], turns: [], nextSeq: 0, gapDetected: false }),
+  setError: (message) => set({ error: message }),
+
+  reset: () => set({ events: [], turns: [], nextSeq: 0, gapDetected: false, error: null }),
 }))

@@ -59,6 +59,7 @@ export function TrajectoryView({ sessionID }: TrajectoryViewProps) {
   const events = useTrajectoryStore((s) => s.events)
   const turns = useTrajectoryStore((s) => s.turns)
   const gapDetected = useTrajectoryStore((s) => s.gapDetected)
+  const error = useTrajectoryStore((s) => s.error)
   const [query, setQuery] = useState('')
 
   const needle = query.trim().toLowerCase()
@@ -84,14 +85,34 @@ export function TrajectoryView({ sessionID }: TrajectoryViewProps) {
         onQueryChange={setQuery}
       />
       <TrajectoryTimeline events={events} />
-      {/* 缺口是「帧漏了、正在从断点补拉」，说出来而不是让人对着一段莫名其妙的空白猜。 */}
-      {gapDetected && (
+      {/* 缺口是「帧漏了、正在从断点补拉」，说出来而不是让人对着一段莫名其妙的空白猜。
+          但补拉失败之后不能再说「正在补拉」——那时什么也没在发生，横幅会一直说谎；
+          失败的说法交给下面那条横幅。 */}
+      {gapDetected && error === null && (
         <p className="border-b border-border px-2 py-1 text-[10px] text-destructive">
           事件序号有缺口：有帧没送到，正在从断点补拉。
         </p>
       )}
+      {/* 取数失败必须在界面上说出来。只写 console.error 等于对用户什么也没说，而空的
+          事件列表会被 TrajectoryTable 说成「这条会话还没有轨迹」——把「没拿到」说成
+          「没有」，正是 fail-loud 铁律禁的零值假装正常。 */}
+      {error !== null && (
+        <p
+          role="alert"
+          className="border-b border-destructive/40 bg-destructive/10 px-2 py-1 text-[10px] text-destructive"
+        >
+          取不到这条会话的轨迹：{error}
+          {gapDetected && '（序号缺口也还没补上。）'}
+        </p>
+      )}
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {needle !== '' && filteredTurns.length === 0 ? (
+        {error !== null && events.length === 0 ? (
+          // 一条都没拿到时**不能**落到 TrajectoryTable 的空态：那句话说的是「这条会话
+          // 没有事件」，而事实是「我们没拿到」。两者在屏幕上必须是不同的话。
+          <p className="p-2 text-xs text-destructive">
+            轨迹没能取到，所以这里是空的——这不表示这条会话没有事件。
+          </p>
+        ) : needle !== '' && filteredTurns.length === 0 ? (
           // 搜不到 ≠ 这条会话没有轨迹。用 TrajectoryTable 的空态文案会把前者说成后者。
           <p className="p-2 text-xs text-muted-foreground">没有匹配「{query}」的事件。</p>
         ) : (

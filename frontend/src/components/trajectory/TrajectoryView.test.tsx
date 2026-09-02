@@ -105,4 +105,34 @@ describe('TrajectoryView', () => {
     expect(screen.getByText(/选择|先选/)).toBeInTheDocument()
     expect(mocks.GetSessionEvents).not.toHaveBeenCalled()
   })
+
+  // 断言落在**组装后的界面**上，不落在 store 上：hook 层那条同名测试（只看
+  // console.error 与 nextSeq）曾经全绿，而屏幕上说的还是「这条会话还没有轨迹。」——
+  // 取数失败与空会话一字不差。这里钉的就是那个用户看得见的区别。
+  it('取数失败时界面说的是取不到，不是「这条会话还没有轨迹」', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mocks.GetSessionEvents.mockRejectedValue(
+      new Error('get /v1/sessions/sess-1/events: status 404: {"error":"session not found"}'),
+    )
+
+    render(<TrajectoryView sessionID="sess-1" />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/取不到/)
+    expect(alert).toHaveTextContent(/404/)
+    // 关键断言：空会话的那句话**不能**出现——否则失败就又被说成了「没有」。
+    expect(screen.queryByText(/还没有轨迹/)).not.toBeInTheDocument()
+    spy.mockRestore()
+  })
+
+  // 与上一条成对：真正的空会话仍旧说「还没有轨迹」，且**不**报错。
+  // 两条一起才证明这两种状态在屏幕上是两句不同的话，而不是碰巧都红。
+  it('真正的空会话说的是还没有轨迹，且不报错', async () => {
+    mocks.GetSessionEvents.mockResolvedValue({ events: [], next_seq: 0 })
+
+    render(<TrajectoryView sessionID="sess-1" />)
+
+    await waitFor(() => expect(screen.getByText(/还没有轨迹/)).toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
 })

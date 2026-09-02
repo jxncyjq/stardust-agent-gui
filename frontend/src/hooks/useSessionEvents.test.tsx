@@ -196,6 +196,26 @@ describe('fail-loud', () => {
     await waitFor(() => expect(spy).toHaveBeenCalled())
     // 没有 loadPage：nextSeq 还停在 0，下一帧会再触发一次。
     expect(useTrajectoryStore.getState().nextSeq).toBe(0)
+    // 失败还得写进 store，否则界面上只剩一个空列表，与「这条会话真的没有事件」
+    // 长得一模一样。用户看得见的那一半由 TrajectoryView.test.tsx 钉住。
+    expect(useTrajectoryStore.getState().error).toContain('404')
+    spy.mockRestore()
+  })
+
+  // seq 是 store 的主键（去重、连续性判定、缺口标记全靠它）。条目缺 seq 时若照塞，
+  // mergeBySeq 会把它们折叠到 undefined 一个键上、gapDetected 静静变 true——
+  // 坏数据无声地改写 store 状态。
+  it('事件条目缺 seq 时记录错误而不是塞进 store', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    mocks.GetSessionEvents.mockResolvedValue(
+      page([{ type: 'turn/start', time: 't', data: { turn: 0 } }], 1),
+    )
+
+    renderHook(() => useSessionEvents('sess-1'))
+
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    expect(useTrajectoryStore.getState().events).toHaveLength(0)
+    expect(useTrajectoryStore.getState().error).not.toBeNull()
     spy.mockRestore()
   })
 
