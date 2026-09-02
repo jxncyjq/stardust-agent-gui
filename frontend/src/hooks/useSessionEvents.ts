@@ -69,7 +69,14 @@ export function useSessionEvents(sessionID: string | null) {
         console.error('agent:session_event 载荷不是合法 JSON:', payload, err)
         return
       }
-      // 见上方前提：全局 store 没有会话分区，跨会话的帧到此为止。
+      // session_id 是端点契约必给字段，缺席/非字符串是坏数据，必须记录——
+      // 否则服务端哪天改了字段名或漏发，轨迹会静静地不更新、不报任何错。
+      if (typeof parsed.session_id !== 'string' || parsed.session_id === '') {
+        console.error('agent:session_event 载荷缺少 session_id:', payload)
+        return
+      }
+      // 见上方前提：全局 store 没有会话分区，跨会话的帧到此为止。别的会话的帧是
+      // 正常流量，安静丢弃、不打日志——记了会刷屏。
       if (parsed.session_id !== sessionID) return
       const seq = Number(parsed.seq)
       if (!Number.isFinite(seq)) {

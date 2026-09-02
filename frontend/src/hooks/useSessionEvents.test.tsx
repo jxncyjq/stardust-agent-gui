@@ -129,6 +129,20 @@ describe('实时追加', () => {
     expect(mocks.GetSessionEvents).not.toHaveBeenCalled()
   })
 
+  // session_id 缺席不是「别的会话」，是坏数据：不能悄悄当成跨会话帧丢掉。
+  it('缺 session_id 的帧被记录且不触发 pull', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    renderHook(() => useSessionEvents('sess-1'))
+    await waitFor(() => expect(mocks.GetSessionEvents).toHaveBeenCalled())
+
+    mocks.GetSessionEvents.mockClear()
+    frameHandler()!({ type: 'session_event', data: JSON.stringify({ seq: 3, event_type: 'tool/call' }) })
+
+    expect(spy).toHaveBeenCalled()
+    expect(mocks.GetSessionEvents).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
   // 别的会话的帧也不许写进全局 store：seq 拿去跟本会话的尾部比会误报缺口。
   it('其它会话的帧不改动轨迹 store', async () => {
     mocks.GetSessionEvents.mockResolvedValue(
@@ -201,9 +215,12 @@ describe('fail-loud', () => {
   })
 
   // events 不是数组同样是坏数据：直接塞进 store 会让整个轨迹视图炸在渲染里。
+  // 用可迭代但非数组的坏值（字符串）——不可迭代的坏值（如普通对象）没有守卫
+  // 也会在 mergeBySeq 的 for-of 里抛出、被 catch 接住,那样测试就测不出守卫
+  // 是否存在（见复审 I-2：删掉守卫这条测试照样绿）。
   it('events 不是数组时记录错误而不是塞进 store', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    mocks.GetSessionEvents.mockResolvedValue({ events: { seq: 0 }, next_seq: 1 })
+    mocks.GetSessionEvents.mockResolvedValue({ events: 'ab', next_seq: 1 })
 
     renderHook(() => useSessionEvents('sess-1'))
 
