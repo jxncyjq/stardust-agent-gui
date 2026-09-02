@@ -40,6 +40,8 @@ export function GetConfig():Promise<string>;
 
 export function GetConfigPath():Promise<string>;
 
+export function GetSessionEvents(arg1:string,arg2:number,arg3:number):Promise<Record<string, any>>;
+
 export function GetSessionTurns(arg1:string):Promise<Array<Record<string, any>>>;
 
 export function GetTaskResult(arg1:string):Promise<Record<string, any>>;

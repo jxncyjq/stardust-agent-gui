@@ -193,6 +193,16 @@ func consumeSSEWithToken(ctx context.Context, url, token string, emit func(event
 						"type": eventType,
 						"data": data,
 					})
+				case "session_event":
+					// 会话事件走专用频道。通用 agent:event 频道每个流式 token 一条，
+					// 让轨迹订它等于模型每吐一个字就唤醒一次面板——与 approval/browser/plugin
+					// 分频道的理由完全一样。
+					//
+					// data 原样转发（与其它专用频道一致），React 侧自己 parse。
+					emit("agent:session_event", map[string]any{
+						"type": eventType,
+						"data": data,
+					})
 				case "browser:session_opened", "browser:session_closed":
 					// Browser session lifecycle events get a dedicated channel so
 					// the browser view can discover active sessions without filtering

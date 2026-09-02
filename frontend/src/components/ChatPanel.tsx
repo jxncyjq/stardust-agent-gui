@@ -28,7 +28,52 @@ import { ModeSelector } from './ModeSelector'
 import { ModelBadge } from './ModelBadge'
 import { ApprovalPrompt } from './ApprovalPrompt'
 import { useAgentStore } from '../stores/agentStore'
+import { TrajectoryView } from './trajectory/TrajectoryView'
+import { cn } from '../lib/utils'
 import { mapGeneratedFiles, type GeneratedFile } from '../lib/generatedFiles'
+
+// ChatColumnTab 选中间栏顶部的两个标签之一。
+//
+// 轨迹与对话**互斥**（spec §7 的 I1）：轨迹是「回头看整件事」的专注动作，一行
+// 「命令 → 结果」需要整条栏的横向空间，所以它顶掉对话而不是挤在对话旁边。
+type ChatColumnTab = 'chat' | 'trajectory'
+
+const COLUMN_TABS: { id: ChatColumnTab; label: string }[] = [
+  { id: 'chat', label: '对话' },
+  { id: 'trajectory', label: '轨迹' },
+]
+
+// ColumnTabBar 画中间栏顶部的「对话 / 轨迹」。样式与用法照右侧状态栏的 tab 条
+// （StatusPanel），这样两栏的标签看起来是同一种东西。
+function ColumnTabBar({
+  active,
+  onSelect,
+}: {
+  active: ChatColumnTab
+  onSelect: (tab: ChatColumnTab) => void
+}) {
+  return (
+    <div role="tablist" className="flex border-b border-border">
+      {COLUMN_TABS.map((tab) => (
+        <button
+          key={tab.id}
+          type="button"
+          role="tab"
+          aria-selected={active === tab.id}
+          className={cn(
+            'interactive flex-1 py-2 text-xs font-medium',
+            active === tab.id
+              ? 'text-foreground border-b-2 border-primary'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+          )}
+          onClick={() => onSelect(tab.id)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 // ChatEmptyState fills the message area before the first message: it gives the
 // otherwise-blank pane an identity, tells the user how to send, and surfaces a
@@ -297,6 +342,12 @@ export function ChatPanel() {
 
   const currentRun = currentSessionId ? runs[currentSessionId] : undefined
   const sending = currentRun?.running ?? false
+
+  // 中间栏顶部的标签。它留在 ChatPanel 内部而不是包一层外壳，是为了让**切到轨迹时
+  // 对话的订阅继续活着**：useAgentEvents 和这个组件里等任务结果的那些 effect 都挂在
+  // ChatPanel 上，把 ChatPanel 整个换下去等于在用户看轨迹的那几十秒里停掉流式接收。
+  // 互斥只发生在渲染上——下面的 JSX 二选一，输入框在轨迹标签下确实不存在。
+  const [columnTab, setColumnTab] = useState<ChatColumnTab>('chat')
 
   const [input, setInput] = useState('')
   // Selected images for the next message, held as data URIs
@@ -811,8 +862,26 @@ export function ChatPanel() {
 
   const elapsedSec = currentRun?.running ? Math.floor((now - currentRun.startedAt) / 1000) : 0
 
+  if (columnTab === 'trajectory') {
+    return (
+      <div className="flex flex-col h-full">
+        <ColumnTabBar active={columnTab} onSelect={setColumnTab} />
+        {/* 待批的 Manual 审批票跟着标签走：它不是对话内容，是**挡住任务的一道门**。
+            把它留在对话标签下，用户在轨迹标签上等的就是一个永远不动的任务，而屏幕上
+            没有任何东西说明为什么。ApprovalPrompt 没有待批票时渲染 null。 */}
+        <ApprovalPrompt />
+        <div className="flex-1 min-h-0">
+          {/* currentSessionId 用空串表示「没选会话」；轨迹的契约是 null，这里显式转换，
+              不让空串一路漏到取数层去发一个 id 为空的请求。 */}
+          <TrajectoryView sessionID={currentSessionId === '' ? null : currentSessionId} />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-full">
+      <ColumnTabBar active={columnTab} onSelect={setColumnTab} />
       {/* Message list */}
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
         {messages.length === 0 ? (

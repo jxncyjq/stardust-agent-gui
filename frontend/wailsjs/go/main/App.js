@@ -78,6 +78,10 @@ export function GetConfigPath() {
   return window['go']['main']['App']['GetConfigPath']();
 }
 
+export function GetSessionEvents(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetSessionEvents'](arg1, arg2, arg3);
+}
+
 export function GetSessionTurns(arg1) {
   return window['go']['main']['App']['GetSessionTurns'](arg1);
 }

@@ -21,6 +21,11 @@ const mocks = vi.hoisted(() => ({
   ServeStatus: vi.fn(),
   ListPendingApprovals: vi.fn(),
   GetAgentModelInfo: vi.fn(),
+  // 「轨迹」标签把 TrajectoryView 拉进了 ChatPanel 的模块图，于是它的两个绑定也
+  // 得在这个 mock 里：vi.mock 的工厂决定了模块有哪些具名导出，漏一个就是 import
+  // 期 "No X export is defined on the mock" 而不是运行期的空值。
+  GetSessionEvents: vi.fn(),
+  FetchPreviewFile: vi.fn(),
 }))
 vi.mock('../../wailsjs/go/main/App', () => mocks)
 
@@ -91,6 +96,9 @@ beforeEach(() => {
   mocks.ListPendingApprovals.mockResolvedValue([])
   mocks.GetAgentModelInfo.mockResolvedValue({ model: 'test-model', context_length: 128000, profile: 'p' })
   mocks.InterruptTask.mockResolvedValue(undefined)
+  // 空轨迹页：events 为空、next_seq 为 0 都是端点契约里的合法取值。不给的话
+  // useSessionEvents 会把 undefined 的 next_seq 当坏数据报错，噪音掩盖真失败。
+  mocks.GetSessionEvents.mockResolvedValue({ events: [], next_seq: 0 })
   useChatStore.setState({ messages: [] })
   useSessionStore.setState({ currentSessionId: '', sessions: [] })
   useRunStore.setState({ runs: {}, now: Date.now() })
@@ -792,5 +800,65 @@ describe('ChatPanel keeps waiting through an approval suspend', () => {
 
     const assistant = useChatStore.getState().messages.filter((m) => m.role === 'assistant')
     expect(assistant.some((m) => m.content.includes('suspended，暂无结果'))).toBe(false)
+  })
+})
+
+// 轨迹与对话互斥（spec §7 的 I1）：轨迹是「回头看整件事」的专注动作，需要整条栏的
+// 横向空间放「命令 → 结果」，所以它不是对话旁边的一块，而是顶掉对话的一个标签。
+describe('ChatPanel 顶部的「对话 / 轨迹」标签', () => {
+  it('对话与轨迹是互斥的两个标签', async () => {
+    seedSession()
+    const user = userEvent.setup()
+    render(<ChatPanel />)
+
+    // 默认在「对话」：输入框在。
+    expect(screen.getByPlaceholderText(/输入消息/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: '轨迹' }))
+
+    // 切到「轨迹」：对话的输入框不在了，轨迹在了。
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText(/输入消息/)).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('searchbox', { name: '搜索轨迹' })).toBeInTheDocument()
+
+    // 切回去：轨迹让位给对话，同样是互斥的。
+    await user.click(screen.getByRole('tab', { name: '对话' }))
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/输入消息/)).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('searchbox', { name: '搜索轨迹' })).not.toBeInTheDocument()
+  })
+
+  // 待批的审批票挡着任务：它跟着标签走，否则用户在轨迹标签上等的是一个永远不动的
+  // 任务，而屏幕上没有任何东西说明为什么。
+  it('切到轨迹后，待批的审批票仍然看得见', async () => {
+    seedSession()
+    useApprovalStore.getState().onPending({
+      ticket_id: 't1',
+      task_id: 'task-1',
+      tool: 'shell',
+      arguments: { cmd: 'rm -rf /tmp/x' },
+      requested_by: 'host:sensitive',
+    })
+    const user = userEvent.setup()
+    render(<ChatPanel />)
+
+    await user.click(screen.getByRole('tab', { name: '轨迹' }))
+
+    expect(screen.getByRole('button', { name: '批准' })).toBeInTheDocument()
+  })
+
+  it('轨迹标签看的是当前选中的会话', async () => {
+    seedSession()
+    const user = userEvent.setup()
+    render(<ChatPanel />)
+
+    await user.click(screen.getByRole('tab', { name: '轨迹' }))
+
+    // 接线守卫：视图不取数就永远空着，而那不报任何错。
+    await waitFor(() => {
+      expect(mocks.GetSessionEvents).toHaveBeenCalledWith('s1', 0, expect.any(Number))
+    })
   })
 })
