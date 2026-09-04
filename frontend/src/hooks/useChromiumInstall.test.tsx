@@ -63,13 +63,13 @@ describe('useChromiumInstall', () => {
 
   // 脚本说装完了、查找逻辑却看不到，是失败而不是成功：那正是「装到了 App 旁边而不是
   // App 里面」的形态，Go 侧对同一情形也是报错。
-  it('完成行之后路径仍为空 → failed', async () => {
+  it('完成行之后路径仍为空 → install-failed', async () => {
     render(<Harness />)
     await waitFor(() => expect(mocks.EventsOn).toHaveBeenCalled())
     useChromiumStore.getState().start()
     mocks.BundledChromiumPath.mockResolvedValue('')
     installHandler()('安装完成：')
-    await waitFor(() => expect(useChromiumStore.getState().status).toBe('failed'))
+    await waitFor(() => expect(useChromiumStore.getState().status).toBe('install-failed'))
   })
 
   it('失败行落成 failed，错误里不带那个前缀', async () => {
@@ -77,8 +77,40 @@ describe('useChromiumInstall', () => {
     await waitFor(() => expect(mocks.EventsOn).toHaveBeenCalled())
     useChromiumStore.getState().start()
     installHandler()('安装失败：run the install script: exit status 1')
-    expect(useChromiumStore.getState().status).toBe('failed')
+    expect(useChromiumStore.getState().status).toBe('install-failed')
     expect(useChromiumStore.getState().error).toBe('run the install script: exit status 1')
+  })
+
+  // 首屏探测失败说的是「我没问出来」，不是「我装失败了」——什么都还没装过。两者混成
+  // 一个状态时，用户看到的是「安装内置浏览器失败」，而给出的恢复动作是真的发起一次
+  // 150MB 安装。
+  it('首屏探测失败落到 probe-failed，不是 install-failed', async () => {
+    mocks.BundledChromiumPath.mockRejectedValue('serve is down')
+    render(<Harness />)
+    await waitFor(() => expect(useChromiumStore.getState().status).toBe('probe-failed'))
+    expect(useChromiumStore.getState().error).toContain('serve is down')
+  })
+
+  // 完成行触发的那次复核也要认 cancelled：首屏探测那次一直认，这次不认，等于这个标志
+  // 只被遵守了一半。
+  it('卸载之后，完成行触发的那次复核不再写 store', async () => {
+    const { unmount } = render(<Harness />)
+    await waitFor(() => expect(mocks.EventsOn).toHaveBeenCalled())
+    const handle = installHandler()
+    useChromiumStore.getState().start()
+
+    let resolvePath: (path: string) => void = () => {}
+    mocks.BundledChromiumPath.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolvePath = resolve
+      }),
+    )
+    handle('安装完成：/opt/app/chrome')
+    unmount()
+    resolvePath('/opt/app/chrome')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(useChromiumStore.getState().status).toBe('installing')
   })
 
   it('卸载时摘掉监听', async () => {

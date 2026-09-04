@@ -2,19 +2,27 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  BundledChromiumPath: vi.fn(),
   InstallBundledChromium: vi.fn(),
   ReinstallBundledChromium: vi.fn(),
+  EventsOn: vi.fn(),
+  EventsOff: vi.fn(),
 }))
 vi.mock('../../../wailsjs/go/main/App', () => ({
+  BundledChromiumPath: mocks.BundledChromiumPath,
   InstallBundledChromium: mocks.InstallBundledChromium,
   ReinstallBundledChromium: mocks.ReinstallBundledChromium,
 }))
+// BrowserPage 用 useChromiumInstall 里的 confirmInstalled（成功方向的复核与事件处理器
+// 共用同一套逻辑），那个模块在顶层 import 了 Wails 的 runtime。
+vi.mock('../../../wailsjs/runtime/runtime', () => ({ EventsOn: mocks.EventsOn, EventsOff: mocks.EventsOff }))
 
 import { BrowserPage } from './BrowserPage'
 import { useChromiumStore } from '../../stores/chromiumStore'
 
 describe('BrowserPage', () => {
   beforeEach(() => {
+    mocks.BundledChromiumPath.mockReset().mockResolvedValue('')
     mocks.InstallBundledChromium.mockReset().mockResolvedValue(undefined)
     mocks.ReinstallBundledChromium.mockReset().mockResolvedValue(undefined)
     useChromiumStore.setState({ status: 'unknown', path: '', lines: [], error: null })
@@ -69,7 +77,7 @@ describe('BrowserPage', () => {
   // 失败原文可能是整个脚本输出。按本仓 #48 的规矩：人话一句 + 折叠原文，不裸铺。
   it('失败时人话在外、原文折叠在 details 里', () => {
     useChromiumStore.setState({
-      status: 'failed',
+      status: 'install-failed',
       error: 'run the install script: exit status 1 ' + 'x'.repeat(400),
     })
     render(<BrowserPage />)
@@ -78,12 +86,74 @@ describe('BrowserPage', () => {
     expect(screen.getByRole('button', { name: '重试' })).toBeEnabled()
   })
 
-  // 绑定 reject 也要把界面带到 failed：事件掉了一次，不该让它永远停在「安装中」。
-  it('绑定 reject 时也落到 failed', async () => {
+  // 绑定 reject 也要把界面带到失败态：事件掉了一次，不该让它永远停在「安装中」。
+  it('绑定 reject 时也落到 install-failed', async () => {
     useChromiumStore.setState({ status: 'absent' })
     mocks.InstallBundledChromium.mockRejectedValue('serve is down')
     render(<BrowserPage />)
     fireEvent.click(screen.getByRole('button', { name: '安装内置浏览器' }))
-    await waitFor(() => expect(useChromiumStore.getState().status).toBe('failed'))
+    await waitFor(() => expect(useChromiumStore.getState().status).toBe('install-failed'))
+  })
+
+  // I-2：成功方向此前只有事件一条路——绑定 resolve 时什么都不做。同一次事件丢失，
+  // 在成功方向上得到的正是「永远停在安装中」，而注释还写着两条路都有兜底。
+  it('绑定 resolve 之后自己复核一次路径：完成事件没到也不会停在「安装中」', async () => {
+    useChromiumStore.setState({ status: 'absent' })
+    mocks.BundledChromiumPath.mockResolvedValue('/opt/app/chrome')
+    render(<BrowserPage />)
+    fireEvent.click(screen.getByRole('button', { name: '安装内置浏览器' }))
+    await waitFor(() => expect(useChromiumStore.getState().status).toBe('installed'))
+    expect(useChromiumStore.getState().path).toBe('/opt/app/chrome')
+  })
+
+  // C-2 场景 A：重装在脚本跑起来之前就失败了（取脚本网络抖动、摘要不符），机器上那个
+  // 旧浏览器还好端端地在。直接重试会走 InstallBundledChromium——那个已装即拒的入口，
+  // 于是必然再失败一次，错误换成一句用户完全看不懂的「已经有浏览器了」；而「重新安装」
+  // 只在 installed 态出现，那个态已经回不去了。
+  it('重试先重新探测：还有浏览器就走确认框，不去撞那个必然被拒的入口', async () => {
+    useChromiumStore.setState({ status: 'install-failed', error: '取脚本时网络抖动' })
+    mocks.BundledChromiumPath.mockResolvedValue('/opt/app/chrome')
+    render(<BrowserPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+    expect(mocks.InstallBundledChromium).not.toHaveBeenCalled()
+    expect(useChromiumStore.getState().status).toBe('installed')
+  })
+
+  it('重试先重新探测：确实没有浏览器就直接装', async () => {
+    useChromiumStore.setState({ status: 'install-failed', error: 'exit status 1' })
+    mocks.BundledChromiumPath.mockResolvedValue('')
+    render(<BrowserPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(mocks.InstallBundledChromium).toHaveBeenCalledTimes(1))
+  })
+
+  // C-2 场景 B：首屏没问出来被渲染成「安装内置浏览器失败」，可什么都没装过；而给出的
+  // 「重试」会真的发起一次 150MB 安装。
+  it('探测失败说的是「没问出来」，给的动作是重新检查而不是重试安装', async () => {
+    useChromiumStore.setState({ status: 'probe-failed', error: 'serve is down' })
+    mocks.BundledChromiumPath.mockResolvedValue('')
+    render(<BrowserPage />)
+
+    expect(screen.getByText(/没能确认/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '重新检查' }))
+    await waitFor(() => expect(useChromiumStore.getState().status).toBe('absent'))
+    expect(mocks.InstallBundledChromium).not.toHaveBeenCalled()
+  })
+
+  // failed 曾是吸收态：没有任何 action 能把 status 送回 installed / absent，于是重装
+  // 失败一次，这台机器在本次会话里就再也无法重装，只能退出重开应用。
+  it('探测失败之后还能回到 installed：失败不再是走不出去的态', async () => {
+    useChromiumStore.setState({ status: 'probe-failed', error: 'serve is down' })
+    mocks.BundledChromiumPath.mockResolvedValue('/opt/app/chrome')
+    render(<BrowserPage />)
+
+    fireEvent.click(screen.getByRole('button', { name: '重新检查' }))
+    await waitFor(() => expect(useChromiumStore.getState().status).toBe('installed'))
+    expect(screen.getByRole('button', { name: '重新安装' })).toBeEnabled()
   })
 })
