@@ -30,58 +30,100 @@
 - Consumes: `chromium.Path() string`、`chromium.Install(ctx, *http.Client, func(string)) error`（均已存在）
 - Produces: `(*App).ReinstallBundledChromium() error` —— 供 Task 4 的前端调用；`(*App).InstallBundledChromium() error` 行为不变
 
-- [ ] **Step 1: 看既有测试里有没有「已装即拒绝」的守卫**
+- [ ] **Step 1: 看既有测试里有没有相关守卫**
 
 Run: `grep -n "InstallBundledChromium" app_chromium_test.go`
 
-有就不重复写，没有就由下一步补上。
+**为什么不能直接用 `chromium.Path()` 写断言**：`go test` 下它**恒为空**——它按
+`os.Executable()` 找同级目录，而测试二进制在临时目录里（2026-09-04 探针实测）。以
+`if chromium.Path() == "" { t.Skip() }` 开头的测试在任何机器上都会 skip，套件全绿而
+断言一次没跑，正是本仓栽过多次的「绿得不是地方」。所以先加一道注入接缝。
 
-- [ ] **Step 2: 写失败测试**
+- [ ] **Step 2: 加接缝——`App.chromiumPath`**
 
-追加到 `app_chromium_test.go`（import 需要 `strings` 与 `legionAgentGUI/internal/chromium`）：
+`app.go` 的 `App` 结构体（`:18-24`）加一个字段：
+
+```go
+	// chromiumPath 回答「现在有没有内置浏览器」。它是字段而不是直接调
+	// chromium.Path()，只为一件事：让「已装时该不该拒绝安装」这条判断可测。
+	// chromium.Path() 按 os.Executable() 的同级目录找，而 go test 的二进制在临时
+	// 目录里——它在测试下恒为空，任何以它为前提的断言都会静默跳过。
+	// NewApp 填 chromium.Path，生产路径逐字不变。
+	chromiumPath  func() string
+```
+
+`NewApp` 里 `app := &App{...}` 的字段列表加上 `chromiumPath: chromium.Path,`
+（`app.go` 需要 import `legionAgentGUI/internal/chromium`；若已 import 则不动）。
+
+- [ ] **Step 3: 写失败测试**
+
+追加到 `app_chromium_test.go`（import 需要 `strings`）：
 
 ```go
 // 这两条一起钉的是「加了新入口，旧保护还在」：InstallBundledChromium 对已装直接拒绝
 // （防的是误触发一次 150MB 下载），ReinstallBundledChromium 不做那道检查。
 //
-// 两条都不真的装：它们断言的是**那道前置检查**的有无，走到 chromium.Install 就说明
-// 检查放行了。真正的安装要联网跑脚本，属于真机验证，不在单测里。
-func TestInstallBundledChromiumStillRefusesWhenOneIsPresent(t *testing.T) {
-	if chromium.Path() == "" {
-		t.Skip("这台机器上没有随包浏览器，这条用例断言的前置检查无从触发")
-	}
+// 两条都不真的装：断言落在**那道前置检查**上。注入 chromiumPath 是必须的——真实的
+// chromium.Path() 在 go test 下恒为空，用它写前提等于让这两条永远 skip。
+func TestInstallBundledChromiumRefusesWhenOneIsPresent(t *testing.T) {
 	app := NewApp("")
+	app.chromiumPath = func() string { return "/opt/app/chrome" }
+
 	err := app.InstallBundledChromium()
 	if err == nil {
-		t.Fatal("已经有浏览器时 InstallBundledChromium 必须拒绝：重装意味着再下 150MB，而它当下什么问题也不解决")
+		t.Fatal("已经有浏览器时必须拒绝：重装意味着再下 150MB，而它当下什么问题也不解决")
 	}
 	if !strings.Contains(err.Error(), "already has a browser") {
 		t.Errorf("拒绝的理由变了，界面按这句话判断要不要显示重装入口：%v", err)
 	}
+	if !strings.Contains(err.Error(), "/opt/app/chrome") {
+		t.Errorf("错误里没说是哪一个，排查者无从确认它找到的是哪个浏览器：%v", err)
+	}
 }
 
-func TestReinstallBundledChromiumDoesNotRefuseWhenOneIsPresent(t *testing.T) {
-	if chromium.Path() == "" {
-		t.Skip("这台机器上没有随包浏览器，这条用例断言的前置检查无从触发")
-	}
+// ReinstallBundledChromium 必须**绕过**那道检查。它不走到真安装：这里注入一个非空
+// 路径，只要错误不是「已经有了」，就说明检查放行了。
+func TestReinstallBundledChromiumSkipsThePresenceCheck(t *testing.T) {
 	app := NewApp("")
+	app.chromiumPath = func() string { return "/opt/app/chrome" }
+
 	err := app.ReinstallBundledChromium()
 	if err != nil && strings.Contains(err.Error(), "already has a browser") {
 		t.Fatal("ReinstallBundledChromium 走了 InstallBundledChromium 的前置检查：重装入口的全部意义就是绕过它")
 	}
 }
+
+// 没有浏览器时 InstallBundledChromium 也必须放行——否则「装一次」这条主路径就没了。
+func TestInstallBundledChromiumProceedsWhenNoneIsPresent(t *testing.T) {
+	app := NewApp("")
+	app.chromiumPath = func() string { return "" }
+
+	err := app.InstallBundledChromium()
+	if err != nil && strings.Contains(err.Error(), "already has a browser") {
+		t.Fatalf("没有浏览器却按「已经有了」拒绝：%v", err)
+	}
+}
 ```
 
-- [ ] **Step 3: 跑测试，确认它红**
+三条都会走到 `chromium.Install`（联网取脚本），那一步失败是**预期**的：它们断言的是
+错误**不是**「已经有了」，而不是安装成功。
 
-Run: `go test -run "TestReinstallBundledChromium|TestInstallBundledChromiumStill" .`
-Expected: 编译失败 `undefined: (*App).ReinstallBundledChromium`
+- [ ] **Step 4: 跑测试，确认它红**
 
-- [ ] **Step 4: 实现（把执行体抽出来共用）**
+Run: `go test -run "BundledChromium" .`
+Expected: 编译失败 `undefined: (*App).ReinstallBundledChromium`（以及 `chromiumPath` 未定义，若 Step 2 还没做）
+
+- [ ] **Step 5: 实现（把执行体抽出来共用）**
 
 改 `app_chromium.go`：
 
 ```go
+// BundledChromiumPath 返回这次安装自带的浏览器路径；没带就是空。
+//
+// 界面用它决定要不要提示安装：空**不是错误**，一次不含浏览器的安装照样能跑，
+// Agent 会退到系统上装着的浏览器。
+func (a *App) BundledChromiumPath() string { return a.chromiumPath() }
+
 // InstallBundledChromium 按当前系统去 GitHub 取对应的安装脚本，校验之后执行它，
 // 把那个固定版浏览器装到 App 旁边。
 //
@@ -92,7 +134,7 @@ Expected: 编译失败 `undefined: (*App).ReinstallBundledChromium`
 // 已经有浏览器时它**拒绝**：重装意味着再下 150MB，而它当下什么问题也不解决。要覆盖
 // 装一次是另一件事，走 ReinstallBundledChromium。
 func (a *App) InstallBundledChromium() error {
-	if path := chromium.Path(); path != "" {
+	if path := a.chromiumPath(); path != "" {
 		return fmt.Errorf("this install already has a browser at %s", path)
 	}
 	return a.runChromiumInstall()
@@ -131,15 +173,15 @@ func (a *App) runChromiumInstall() error {
 		emit("安装失败：" + err.Error())
 		return err
 	}
-	emit("安装完成：" + chromium.Path())
+	emit("安装完成：" + a.chromiumPath())
 	return nil
 }
 ```
 
-- [ ] **Step 5: 跑测试，确认它绿**
+- [ ] **Step 5b: 跑测试，确认它绿**
 
-Run: `go test -run "TestReinstallBundledChromium|TestInstallBundledChromiumStill" . && go test ./...`
-Expected: 两条 PASS（没有随包浏览器的机器上是 SKIP），全量两包 ok
+Run: `go test -run "BundledChromium" . && go test ./...`
+Expected: 三条 PASS（**不是 SKIP**——若看到 SKIP 说明接缝没接上），全量两包 ok
 
 - [ ] **Step 6: 生成 Wails 绑定**
 
