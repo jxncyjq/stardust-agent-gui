@@ -57,11 +57,26 @@ function RawJSON({ event }: { event: SessionEvent }) {
  * Malformed 是 fail-loud 的显示面：约定字段缺席/类型不对不是「空」，是坏数据。
  * 渲染成醒目的一行 + 可展开的原始 JSON，而不是悄悄渲染成空白。
  */
-function Malformed({ event, field }: { event: SessionEvent; field: string }) {
+// Malformed 说的是「这条事件的某个字段不能用」，reason 决定说哪一句。
+//
+// 两句话必须分开，因为它们让排查者去做的事不同：「缺失或类型不对」是让人去 server
+// 查那个字段有没有写、写成了什么类型；而「字段在、是字符串、但按契约不该为空」时，
+// 照着前一句去查会查到一个好端端的空串，然后怀疑是界面读错了。说错话比不说更贵。
+function Malformed({
+  event,
+  field,
+  reason = 'absent-or-wrong-type',
+}: {
+  event: SessionEvent
+  field: string
+  reason?: 'absent-or-wrong-type' | 'empty'
+}) {
   return (
     <Row badge="BAD" badgeClass="bg-destructive/15 text-destructive">
       <p className="text-destructive">
-        事件 #{event.seq}（{event.type}）的 {field} 字段缺失或类型不对
+        {reason === 'empty'
+          ? `事件 #${event.seq}（${event.type}）的 ${field} 字段是空串，而按契约它不该为空`
+          : `事件 #${event.seq}（${event.type}）的 ${field} 字段缺失或类型不对`}
       </p>
       <RawJSON event={event} />
     </Row>
@@ -154,7 +169,11 @@ export function TrajectoryCell({ event, sessionID }: TrajectoryCellProps) {
   if (type === 'user/message') {
     const content = str(data, 'content')
     // user 的正文没有「合法为空」的场景（空的用户消息不会产生一轮），缺席即坏数据。
-    if (content === null || content === '') return <Malformed event={event} field="content" />
+    // 这个判断本身仍存疑（task-4-review.md Important-3：无 server 契约实锤，且与
+    // assistant/message 把空串当合法可选不对称），但存疑的是判断，不是说法——空串
+    // 要按空串说，不能说成「缺失或类型不对」。
+    if (content === null) return <Malformed event={event} field="content" />
+    if (content === '') return <Malformed event={event} field="content" reason="empty" />
     return (
       <Row badge="USER" badgeClass="bg-primary/15 text-primary">
         <p className="whitespace-pre-wrap">{content}</p>
@@ -218,7 +237,14 @@ export function TrajectoryCell({ event, sessionID }: TrajectoryCellProps) {
         badgeClass={isError ? 'bg-destructive/15 text-destructive' : 'bg-sky-500/15 text-sky-600 dark:text-sky-400'}
       >
         {isError && <span className="mr-1 rounded bg-destructive/15 px-1 text-[10px] text-destructive">出错</span>}
-        <span className="whitespace-pre-wrap">{preview}</span>
+        {preview === '' ? (
+          // 空 preview 是合法的（工具真的没有输出），但渲染成纯空白就只剩一个
+          // RESULT 徽章，看的人分不出「工具没输出」和「这一行坏了」。同一条规矩
+          // 已经用在 assistant 的「（无正文）」和 tool/call 的「（无参数）」上。
+          <span className="italic text-muted-foreground">（无输出）</span>
+        ) : (
+          <span className="whitespace-pre-wrap">{preview}</span>
+        )}
         {locator !== '' && <SpillLink sessionID={sessionID} locator={locator} />}
       </Row>
     )
