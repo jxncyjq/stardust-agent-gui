@@ -57,6 +57,11 @@ call :ensure_wails || exit /b 1
 call :ensure_workspace || exit /b 1
 echo [dev] wails dev @ %GUI% (Ctrl+C to stop)
 pushd "%GUI%"
+REM -m skips `go mod tidy`, which is REQUIRED, not a time saver: tidy resolves in
+REM single-module mode and ignores the workspace replace in ..\go.work, so it goes
+REM to the network for the unpublished sibling module and dies with
+REM "Repository not found". Removing -m makes every command below fail. See the
+REM README and TestEveryWailsCommandLineSkipsModTidy.
 wails dev -m
 popd
 goto :eof
