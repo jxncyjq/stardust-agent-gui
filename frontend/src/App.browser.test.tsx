@@ -15,6 +15,7 @@ vi.mock('./components/settings/SettingsModal', () => ({ SettingsModal: () => nul
 vi.mock('./components/ConfirmDialog', () => ({ ConfirmDialog: () => null }))
 vi.mock('./hooks/useBrowserSession', () => ({ useBrowserSession: () => {} }))
 vi.mock('./hooks/useHtmlPreviewEvents', () => ({ useHtmlPreviewEvents: () => {} }))
+vi.mock('./hooks/useChromiumInstall', () => ({ useChromiumInstall: () => {} }))
 vi.mock('./components/BrowserView', () => ({
   BrowserView: ({ onClose }: { onClose?: () => void }) => (
     <div>

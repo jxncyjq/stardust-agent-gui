@@ -14,6 +14,7 @@ vi.mock('../wailsjs/go/main/App', () => ({
   SearchWorkspaceContent: vi.fn().mockResolvedValue([]),
   OpenInEditor: vi.fn().mockResolvedValue(undefined),
   RevealInExplorer: vi.fn().mockResolvedValue(undefined),
+  BundledChromiumPath: vi.fn().mockResolvedValue(''),
 }))
 vi.mock('../wailsjs/runtime/runtime', () => ({
   EventsOn: vi.fn(() => () => {}),
