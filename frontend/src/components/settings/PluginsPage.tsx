@@ -135,6 +135,26 @@ function ErrorDetail({
   )
 }
 
+// chainAlreadyDisclosed reports whether `detail` is already visible on this row
+// through the declaration error's disclosure.
+//
+// The server sets BOTH fields for a package whose declaration could not be
+// loaded, and for the failure that actually happens — a signature that does not
+// verify — they are the same chain, declared_error merely prefixed with
+// "plugin consent: load declared manifest for …". Rendering both told the
+// operator the same thing twice, once folded and once not.
+//
+// Containment, not equality: the prefix is what makes them differ, and the row
+// must keep showing detail whenever it is genuinely a DIFFERENT failure (a
+// declaration that loaded but a plugin that then failed to activate says two
+// things, and both belong on screen).
+function chainAlreadyDisclosed(detail: string, declaredError?: string): boolean {
+  const chain = detail.trim()
+  const declared = (declaredError ?? '').trim()
+  if (!chain || !declared) return false
+  return declared.includes(chain)
+}
+
 // pluginEventReloadDelayMs is the trailing debounce on event-driven reloads.
 //
 // Long enough that one convergence's burst of events collapses into a single
@@ -741,10 +761,24 @@ function PluginRow({
           )}
           {state !== 'unauthorized' && state !== 'disabled' && (
             <>
-              {detail && (
-                <p className="text-xs text-muted-foreground break-all">
-                  {state === 'failed' ? `原因：${detail}` : detail}
-                </p>
+              {detail && !chainAlreadyDisclosed(detail, effectivePlugin.declared_error) && (
+                // A failed state's detail is a loader error CHAIN, not a
+                // sentence: on a signature failure it is 300+ characters
+                // carrying the package's absolute path. It goes behind the
+                // same disclosure the declaration error uses, because a chain
+                // that is folded above and spelled out here is not folded at
+                // all — which is exactly what the 2026-09-04 walkthrough found
+                // on screen. Any other state's detail is the loader's short
+                // human note and stays in plain sight.
+                state === 'failed' ? (
+                  <ErrorDetail
+                    summary="插件加载失败。"
+                    detail={detail}
+                    summaryClass="text-xs text-destructive"
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground break-all">{detail}</p>
+                )
               )}
               <div className="flex gap-2">
                 <button

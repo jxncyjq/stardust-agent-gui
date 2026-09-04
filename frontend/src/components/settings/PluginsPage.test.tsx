@@ -967,3 +967,67 @@ describe('PluginsPage — a convergence retry resends the whole grant', () => {
     expect(mocks.GrantPlugin).toHaveBeenCalledWith('plugin-p', [], [], [], ['decide'])
   })
 })
+
+// 走查（2026-09-04）抓到的那条：同一条错误链先折叠、又原样铺开。
+//
+// 既有的 F1 用例用 state 'unauthorized' 构造 load_failed 行，而**真服务端对签名
+// 不受信任的包返回 state 'failed'**（真机取证：/v1/plugins 的那一行 state=failed、
+// declared_unresolved_reason=load_failed）。那条裸 detail 段只在 failed 分支渲染，
+// 于是折叠做对了、旁边又铺了一遍，测试却一直是绿的。
+describe('走查 G1：失败行不得把已折叠的错误链再铺开一遍', () => {
+  const CHAIN =
+    'load plugin package "C:\\Users\\ADMINI~1\\AppData\\Local\\Temp\\rt\\plugins\\legion-bad": ' +
+    'verify plugin.json signature: plugin package is not trusted: verify signature: ' +
+    'signature does not verify against key "demo-key"'
+
+  it('declared_error 已经折叠了这条链时，detail 不再重复渲染', async () => {
+    mocks.ListPlugins.mockResolvedValue([
+      makePlugin({
+        name: 'legion-bad',
+        version: '',
+        state: 'failed',
+        detail: CHAIN,
+        declared_unresolved: true,
+        declared_unresolved_reason: 'load_failed',
+        declared_error: `plugin consent: load declared manifest for "legion-bad": ${CHAIN}`,
+      }),
+    ])
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 legion-bad' })
+
+    // 人话与折叠入口都还在。
+    expect(within(row).getByText('插件声明解析失败。')).toBeInTheDocument()
+    expect(within(row).getByText('显示详细错误')).toBeInTheDocument()
+
+    // 链只出现一次，且只出现在折叠区里。
+    const occurrences = within(row).getAllByText(new RegExp('signature does not verify against key'))
+    expect(occurrences).toHaveLength(1)
+    expect(occurrences[0].closest('details')).not.toBeNull()
+  })
+
+  it('没有 declared_error 的失败行，把链折起来而不是铺开', async () => {
+    mocks.ListPlugins.mockResolvedValue([
+      makePlugin({
+        name: 'legion-rt',
+        state: 'failed',
+        detail: CHAIN,
+      }),
+    ])
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 legion-rt' })
+
+    const chain = within(row).getByText(new RegExp('signature does not verify against key'))
+    expect(chain.closest('details')).not.toBeNull()
+    expect(within(row).getByText('显示详细错误')).toBeInTheDocument()
+  })
+
+  it('非失败状态的短 detail 仍然直接显示（不折叠）', async () => {
+    mocks.ListPlugins.mockResolvedValue([
+      makePlugin({ name: 'legion-ok', state: 'active', detail: '已加载 2 个工具' }),
+    ])
+    render(<PluginsPage />)
+    const row = await screen.findByRole('group', { name: '插件 legion-ok' })
+    const note = within(row).getByText('已加载 2 个工具')
+    expect(note.closest('details')).toBeNull()
+  })
+})
