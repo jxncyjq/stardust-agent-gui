@@ -99,7 +99,7 @@ func installScripts() map[string]installScript {
 		"windows": {
 			remoteFile: remoteFile{
 				Path:   "scripts/install-chromium.ps1",
-				SHA256: "94fac75f98100e6bb0f8cf887ae242e2b88f17d6b079b6e59ef9f0ada6eb69d2",
+				SHA256: "e6373fbce9757fccdf1fc907d97c6383cc936d00b8071397a647365347f44184",
 			},
 			Command: windowsInstallCommand,
 		},
