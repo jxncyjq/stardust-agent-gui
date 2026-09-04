@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,13 +16,30 @@ import (
 //
 // 两条都不真的装：断言落在**那道前置检查**上。注入 chromiumPath 是必须的——真实的
 // chromium.Path() 在 go test 下恒为空，用它写前提等于让这两条永远 skip。
-func TestInstallBundledChromiumRefusesWhenOneIsPresent(t *testing.T) {
+// newChromiumTestApp 给出一个**不碰网络**的 App：路径可注入，安装被换成记账用的假
+// 实现。返回的计数器就是断言的着力点——「有没有走到安装」比「安装返回了什么」更接近
+// 这些用例真正要钉的东西。
+func newChromiumTestApp(t *testing.T, path string) (*App, *int) {
+	t.Helper()
 	app := NewApp("")
-	app.chromiumPath = func() string { return "/opt/app/chrome" }
+	installs := 0
+	app.chromiumPath = func() string { return path }
+	app.installChromium = func(context.Context, *http.Client, func(string)) error {
+		installs++
+		return nil
+	}
+	return app, &installs
+}
+
+func TestInstallBundledChromiumRefusesWhenOneIsPresent(t *testing.T) {
+	app, installs := newChromiumTestApp(t, "/opt/app/chrome")
 
 	err := app.InstallBundledChromium()
 	if err == nil {
 		t.Fatal("已经有浏览器时必须拒绝：重装意味着再下 150MB，而它当下什么问题也不解决")
+	}
+	if *installs != 0 {
+		t.Errorf("拒绝之后仍然走到了安装：%d 次", *installs)
 	}
 	if !strings.Contains(err.Error(), "already has a browser") {
 		t.Errorf("拒绝的理由变了，界面按这句话判断要不要显示重装入口：%v", err)
@@ -33,23 +52,25 @@ func TestInstallBundledChromiumRefusesWhenOneIsPresent(t *testing.T) {
 // ReinstallBundledChromium 必须**绕过**那道检查。它不走到真安装：这里注入一个非空
 // 路径，只要错误不是「已经有了」，就说明检查放行了。
 func TestReinstallBundledChromiumSkipsThePresenceCheck(t *testing.T) {
-	app := NewApp("")
-	app.chromiumPath = func() string { return "/opt/app/chrome" }
+	app, installs := newChromiumTestApp(t, "/opt/app/chrome")
 
-	err := app.ReinstallBundledChromium()
-	if err != nil && strings.Contains(err.Error(), "already has a browser") {
-		t.Fatal("ReinstallBundledChromium 走了 InstallBundledChromium 的前置检查：重装入口的全部意义就是绕过它")
+	if err := app.ReinstallBundledChromium(); err != nil {
+		t.Fatalf("重装入口不该因为「已经有了」而失败：%v", err)
+	}
+	if *installs != 1 {
+		t.Errorf("重装入口没有走到安装（%d 次）：它的全部意义就是绕过那道前置检查", *installs)
 	}
 }
 
 // 没有浏览器时 InstallBundledChromium 也必须放行——否则「装一次」这条主路径就没了。
 func TestInstallBundledChromiumProceedsWhenNoneIsPresent(t *testing.T) {
-	app := NewApp("")
-	app.chromiumPath = func() string { return "" }
+	app, installs := newChromiumTestApp(t, "")
 
-	err := app.InstallBundledChromium()
-	if err != nil && strings.Contains(err.Error(), "already has a browser") {
-		t.Fatalf("没有浏览器却按「已经有了」拒绝：%v", err)
+	if err := app.InstallBundledChromium(); err != nil {
+		t.Fatalf("没有浏览器时安装必须放行：%v", err)
+	}
+	if *installs != 1 {
+		t.Errorf("没有浏览器却没走到安装（%d 次）：这条主路径没了", *installs)
 	}
 }
 

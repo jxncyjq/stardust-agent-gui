@@ -30,6 +30,13 @@ type App struct {
 	// 目录里——它在测试下恒为空，任何以它为前提的断言都会静默跳过。
 	// NewApp 填 chromium.Path，生产路径逐字不变。
 	chromiumPath func() string
+
+	// installChromium 执行那次真正的安装。它是字段而不是直接调 chromium.Install，
+	// 理由与 chromiumPath 同类但更硬：chromium.Install 会去 GitHub 取脚本并**执行
+	// 它**（一次 150MB 的下载）。任何走到它的测试都会变成一个下载器，在有网络的 CI
+	// 上尤其明显，而那些测试想验的其实只是「前置检查放没放行」。
+	// NewApp 填 chromium.Install，生产路径逐字不变。
+	installChromium func(ctx context.Context, client *http.Client, progress func(string)) error
 }
 
 func NewApp(cfgPath string) *App {
@@ -46,9 +53,10 @@ func NewApp(cfgPath string) *App {
 	transport.IdleConnTimeout = 90 * time.Second
 
 	app := &App{
-		serve:        NewServeManager(),
-		cfgPath:      cfgPath,
-		chromiumPath: chromium.Path,
+		serve:           NewServeManager(),
+		cfgPath:         cfgPath,
+		chromiumPath:    chromium.Path,
+		installChromium: chromium.Install,
 	}
 	// Authenticate at the TRANSPORT, not at each call site. The serve this app
 	// starts mints a one-time loopback bearer token, and every request to it

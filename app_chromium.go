@@ -5,8 +5,6 @@ import (
 	"fmt"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-
-	"legionAgentGUI/internal/chromium"
 )
 
 // BundledChromiumPath 返回这次安装自带的浏览器路径；没带就是空。
@@ -60,7 +58,7 @@ func (a *App) runChromiumInstall() error {
 			runtime.EventsEmit(a.ctx, "chromium:install", line)
 		}
 	}
-	if err := chromium.Install(ctx, a.client, emit); err != nil {
+	if err := a.installChromium(ctx, a.client, emit); err != nil {
 		emit("安装失败：" + err.Error())
 		return err
 	}
