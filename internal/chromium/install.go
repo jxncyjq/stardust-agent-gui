@@ -1,6 +1,7 @@
 package chromium
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -108,7 +109,9 @@ const maxScriptBytes = 1 << 20
 // 每一步的失败都带着「哪一步、为什么」返回，不吞：装不上时用户看到的应该是
 // 「摘要不符」或「连不上 GitHub」，而不是一句「安装失败」。
 //
-// progress 收到脚本的输出（下载进度、装到哪、装完的版本）。它可以为 nil。
+// progress 在脚本**还在跑的时候**逐行收到它的输出（下载进度、装到哪、装完的版本），
+// 不是等它退出之后一次性倒出来——整件事要几分钟，没有进度的几分钟用户会以为它死了
+// （见 runInstallScript）。它可以为 nil。
 func Install(ctx context.Context, client *http.Client, progress func(line string)) error {
 	appDir, err := appExecutableDir()
 	if err != nil {
@@ -149,17 +152,8 @@ func Install(ctx context.Context, client *http.Client, progress func(line string
 		return fmt.Errorf("write the install script to %s: %w", scriptPath, err)
 	}
 
-	cmd := script.Command(scriptPath, appDir)
-	output, err := cmd.CombinedOutput()
-	if progress != nil {
-		for _, line := range strings.Split(strings.TrimRight(string(output), "\r\n"), "\n") {
-			if trimmed := strings.TrimRight(line, "\r"); trimmed != "" {
-				progress(trimmed)
-			}
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("run the install script: %w\n%s", err, output)
+	if err := runInstallScript(script.Command(scriptPath, appDir), progress); err != nil {
+		return err
 	}
 
 	// 装完之后**由查找逻辑自己回答**它看不看得见，而不是相信脚本说的「装到了 X」。
@@ -213,4 +207,103 @@ func appExecutableDir() (string, error) {
 		exe = resolved
 	}
 	return filepath.Dir(exe), nil
+}
+
+// maxErrorTailLines 是脚本失败时随错误带回的输出行数上限。
+//
+// 老实现用 CombinedOutput，错误里带的是**全部**输出；改成边读边发之后这份要自己攒，
+// 而「自己攒」就必须有个头：脚本在下 150MB 的过程里会一直写。留的是**最后**这些行
+// ——它们才是「卡在哪一步」的答案。
+const maxErrorTailLines = 200
+
+// maxLineBytes 是单行的上限。用 \r 刷新的进度条可以一直不写 \n；没有这个上限，那种
+// 输出会让缓冲区一直涨，而且在脚本结束之前一行也发不出去——正是这里要修的毛病。
+const maxLineBytes = 8 << 10
+
+// runInstallScript 执行安装脚本，**边跑边**把它的输出逐行交给 progress。
+//
+// 不用 CombinedOutput：那个函数缓冲到进程退出才返回，于是回调只能发生在安装已经结束
+// 之后，界面在下载与解压的几分钟里一个字都收不到——没有进度的几分钟，用户会以为它
+// 死了。TestProgressArrivesWhileTheScriptIsStillRunning 钉住这条时序。
+//
+// progress 可以为 nil。失败时错误里仍带着最后 maxErrorTailLines 行输出。
+func runInstallScript(cmd *exec.Cmd, progress func(line string)) error {
+	out := &lineWriter{progress: progress}
+	// stdout 与 stderr 指向**同一个** writer：os/exec 认出这一点并让两者共用一个管道
+	// 与一个复制协程，于是行的先后就是脚本写出来的先后，writer 也不需要自己加锁。
+	cmd.Stdout = out
+	cmd.Stderr = out
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start the install script: %w", err)
+	}
+	// Wait 会等到那个复制协程结束，所以它返回之后 out 不会再被写入。
+	err := cmd.Wait()
+	out.flush()
+	if err != nil {
+		return fmt.Errorf("run the install script: %w\n%s", err, out.tailText())
+	}
+	return nil
+}
+
+// lineWriter 把写进来的字节按行切开：每满一行就交给 progress 一次，同时留下最后
+// maxErrorTailLines 行，供失败时说明「卡在哪一步」。
+//
+// 它只被 os/exec 那一个复制协程写，所以没有锁；这一点由 runInstallScript 里
+// 「Stdout 与 Stderr 是同一个值」保证，改那两行之前先读这里。
+type lineWriter struct {
+	progress func(line string)
+	buf      []byte
+	tail     []string
+	dropped  bool
+}
+
+func (w *lineWriter) Write(p []byte) (int, error) {
+	w.buf = append(w.buf, p...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		w.emit(string(w.buf[:i]))
+		w.buf = w.buf[i+1:]
+	}
+	if len(w.buf) > maxLineBytes {
+		w.emit(string(w.buf))
+		w.buf = w.buf[:0]
+	}
+	return len(p), nil
+}
+
+// flush 把最后那段没有换行结尾的输出也发出去。
+func (w *lineWriter) flush() {
+	if len(w.buf) > 0 {
+		w.emit(string(w.buf))
+		w.buf = w.buf[:0]
+	}
+}
+
+// emit 去掉行尾的 \r（Windows 那份脚本写的是 \r\n），空行既不发也不留。
+func (w *lineWriter) emit(line string) {
+	line = strings.TrimRight(line, "\r")
+	if line == "" {
+		return
+	}
+	w.tail = append(w.tail, line)
+	if len(w.tail) > maxErrorTailLines {
+		w.tail = w.tail[len(w.tail)-maxErrorTailLines:]
+		w.dropped = true
+	}
+	if w.progress != nil {
+		w.progress(line)
+	}
+}
+
+// tailText 是失败时随错误带回的那段输出。截过就说截过：一份没头没尾的日志会让人以为
+// 脚本就是从那里开始的。
+func (w *lineWriter) tailText() string {
+	joined := strings.Join(w.tail, "\n")
+	if w.dropped {
+		return fmt.Sprintf("（只保留最后 %d 行输出）\n%s", maxErrorTailLines, joined)
+	}
+	return joined
 }
