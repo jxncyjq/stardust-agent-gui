@@ -55,6 +55,21 @@ Run: `grep -n "InstallBundledChromium" app_chromium_test.go`
 `NewApp` 里 `app := &App{...}` 的字段列表加上 `chromiumPath: chromium.Path,`
 （`app.go` 需要 import `legionAgentGUI/internal/chromium`；若已 import 则不动）。
 
+- [ ] **Step 2b: 加第二道接缝——`App.installChromium`**
+
+`App` 结构体再加一个字段（挨着 `chromiumPath`）：
+
+```go
+	// installChromium 执行那次真正的安装。它是字段而不是直接调 chromium.Install，
+	// 理由与 chromiumPath 同类但更硬：chromium.Install 会去 GitHub 取脚本并**执行
+	// 它**（一次 150MB 的下载）。任何走到它的测试都会变成一个下载器，在有网络的 CI
+	// 上尤其明显，而那些测试想验的其实只是「前置检查放没放行」。
+	// NewApp 填 chromium.Install，生产路径逐字不变。
+	installChromium func(ctx context.Context, client *http.Client, progress func(string)) error
+```
+
+`NewApp` 的字段列表加 `installChromium: chromium.Install,`。
+
 - [ ] **Step 3: 写失败测试**
 
 追加到 `app_chromium_test.go`（import 需要 `strings`）：
@@ -65,13 +80,30 @@ Run: `grep -n "InstallBundledChromium" app_chromium_test.go`
 //
 // 两条都不真的装：断言落在**那道前置检查**上。注入 chromiumPath 是必须的——真实的
 // chromium.Path() 在 go test 下恒为空，用它写前提等于让这两条永远 skip。
-func TestInstallBundledChromiumRefusesWhenOneIsPresent(t *testing.T) {
+// newChromiumTestApp 给出一个**不碰网络**的 App：路径可注入，安装被换成记账用的假
+// 实现。返回的计数器就是断言的着力点——「有没有走到安装」比「安装返回了什么」更接近
+// 这些用例真正要钉的东西。
+func newChromiumTestApp(t *testing.T, path string) (*App, *int) {
+	t.Helper()
 	app := NewApp("")
-	app.chromiumPath = func() string { return "/opt/app/chrome" }
+	installs := 0
+	app.chromiumPath = func() string { return path }
+	app.installChromium = func(context.Context, *http.Client, func(string)) error {
+		installs++
+		return nil
+	}
+	return app, &installs
+}
+
+func TestInstallBundledChromiumRefusesWhenOneIsPresent(t *testing.T) {
+	app, installs := newChromiumTestApp(t, "/opt/app/chrome")
 
 	err := app.InstallBundledChromium()
 	if err == nil {
 		t.Fatal("已经有浏览器时必须拒绝：重装意味着再下 150MB，而它当下什么问题也不解决")
+	}
+	if *installs != 0 {
+		t.Errorf("拒绝之后仍然走到了安装：%d 次", *installs)
 	}
 	if !strings.Contains(err.Error(), "already has a browser") {
 		t.Errorf("拒绝的理由变了，界面按这句话判断要不要显示重装入口：%v", err)
@@ -84,29 +116,35 @@ func TestInstallBundledChromiumRefusesWhenOneIsPresent(t *testing.T) {
 // ReinstallBundledChromium 必须**绕过**那道检查。它不走到真安装：这里注入一个非空
 // 路径，只要错误不是「已经有了」，就说明检查放行了。
 func TestReinstallBundledChromiumSkipsThePresenceCheck(t *testing.T) {
-	app := NewApp("")
-	app.chromiumPath = func() string { return "/opt/app/chrome" }
+	app, installs := newChromiumTestApp(t, "/opt/app/chrome")
 
-	err := app.ReinstallBundledChromium()
-	if err != nil && strings.Contains(err.Error(), "already has a browser") {
-		t.Fatal("ReinstallBundledChromium 走了 InstallBundledChromium 的前置检查：重装入口的全部意义就是绕过它")
+	if err := app.ReinstallBundledChromium(); err != nil {
+		t.Fatalf("重装入口不该因为「已经有了」而失败：%v", err)
+	}
+	if *installs != 1 {
+		t.Errorf("重装入口没有走到安装（%d 次）：它的全部意义就是绕过那道前置检查", *installs)
 	}
 }
 
 // 没有浏览器时 InstallBundledChromium 也必须放行——否则「装一次」这条主路径就没了。
 func TestInstallBundledChromiumProceedsWhenNoneIsPresent(t *testing.T) {
-	app := NewApp("")
-	app.chromiumPath = func() string { return "" }
+	app, installs := newChromiumTestApp(t, "")
 
-	err := app.InstallBundledChromium()
-	if err != nil && strings.Contains(err.Error(), "already has a browser") {
-		t.Fatalf("没有浏览器却按「已经有了」拒绝：%v", err)
+	if err := app.InstallBundledChromium(); err != nil {
+		t.Fatalf("没有浏览器时安装必须放行：%v", err)
+	}
+	if *installs != 1 {
+		t.Errorf("没有浏览器却没走到安装（%d 次）：这条主路径没了", *installs)
 	}
 }
 ```
 
-三条都会走到 `chromium.Install`（联网取脚本），那一步失败是**预期**的：它们断言的是
-错误**不是**「已经有了」，而不是安装成功。
+**三条都不许碰网络。** 上一版计划让它们走到真的 `chromium.Install`，理由写的是
+「取脚本失败是预期的」——那句话只在**没有网络**的机器上成立。CI 有网络：脚本会取到、
+校验通过、然后**被执行**，于是 `TestInstallBundledChromiumProceedsWhenNoneIsPresent`
+会在 CI 上真下 150MB 装一个浏览器。测试验的东西也就不再是它声称验的那条判断。
+
+所以第二道接缝：`App.installChromium`（见 Step 2b），测试注入一个记账用的假实现。
 
 - [ ] **Step 4: 跑测试，确认它红**
 
@@ -169,7 +207,7 @@ func (a *App) runChromiumInstall() error {
 			runtime.EventsEmit(a.ctx, "chromium:install", line)
 		}
 	}
-	if err := chromium.Install(ctx, a.client, emit); err != nil {
+	if err := a.installChromium(ctx, a.client, emit); err != nil {
 		emit("安装失败：" + err.Error())
 		return err
 	}
@@ -180,8 +218,8 @@ func (a *App) runChromiumInstall() error {
 
 - [ ] **Step 5b: 跑测试，确认它绿**
 
-Run: `go test -run "BundledChromium" . && go test ./...`
-Expected: 三条 PASS（**不是 SKIP**——若看到 SKIP 说明接缝没接上），全量两包 ok
+Run: `go test -run "BundledChromium" -v . && go test ./...`
+Expected: 三条 PASS（**不是 SKIP**），且**每条都在 1 秒内**——超过几秒说明它在联网，接缝没接上。全量两包 ok
 
 - [ ] **Step 6: 生成 Wails 绑定**
 
