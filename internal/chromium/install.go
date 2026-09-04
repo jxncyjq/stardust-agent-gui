@@ -37,7 +37,7 @@ const (
 
 	// scriptRef 钉住取哪一版脚本。**不要改成分支名**：那样 App 执行的就是此刻
 	// HEAD 上的任意内容，而不是随这个版本一起测过的那一份。
-	scriptRef = "c285b8d1add70a3ff3e66e32dd5a8e759d38cdbb"
+	scriptRef = "aa259bbc8c817604ac31624618a0c0ee1e9160b3"
 )
 
 // remoteFile 是一份**随版本钉死**的仓库文件：仓库内路径 + 内容摘要。
