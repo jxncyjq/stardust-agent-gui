@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -27,7 +28,9 @@ type App struct {
 	// chromiumPath 回答「现在有没有内置浏览器」。它是字段而不是直接调
 	// chromium.Path()，只为一件事：让「已装时该不该拒绝安装」这条判断可测。
 	// chromium.Path() 按 os.Executable() 的同级目录找，而 go test 的二进制在临时
-	// 目录里——它在测试下恒为空，任何以它为前提的断言都会静默跳过。
+	// 目录里——它在测试下**默认**为空，以它为前提的断言会静默跳过；测试要让它非空
+	// 就得自己在测试二进制旁边放一个（TestInstallRefusesWhenABrowserIsAlreadyThere
+	// 正是这么做的）。
 	// NewApp 填 chromium.Path，生产路径逐字不变。
 	chromiumPath func() string
 
@@ -37,6 +40,19 @@ type App struct {
 	// 上尤其明显，而那些测试想验的其实只是「前置检查放没放行」。
 	// NewApp 填 chromium.Install，生产路径逐字不变。
 	installChromium func(ctx context.Context, client *http.Client, progress func(string)) error
+
+	// emitInstall 把安装的一行送到界面（"chromium:install" 事件）。**nil 表示界面还
+	// 没起来**——那时候不该开始一次没人看得到过程和结果的 150MB 安装，
+	// runChromiumInstall 会直接拒绝。
+	//
+	// 它是字段而不是直接调 runtime.EventsEmit：那个函数要一个由 Wails 注入的 ctx，
+	// 测试里给不出（拿一个普通 ctx 调它会 panic），于是「安装完成：/安装失败：」这两个
+	// 与前端唯一的约定就没有任何测试跨得过去。startup 填生产实现。
+	emitInstall func(line string)
+
+	// installing 挡住「同时两次安装」。前端那个禁用的按钮不算护栏：界面一重载
+	// （wails dev 热重载 / Ctrl+R）store 就回到初始态，而这边那次安装还在跑。
+	installing atomic.Bool
 }
 
 func NewApp(cfgPath string) *App {
@@ -98,6 +114,9 @@ func (t *loopbackAuthTransport) RoundTrip(req *http.Request) (*http.Response, er
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// 与 ctx 一起填：安装的输出只有这一条路能到界面，而它要的正是这个 ctx。在此之前
+	// 它是 nil，runChromiumInstall 会拒绝开工（见那里的注释）。
+	a.emitInstall = func(line string) { runtime.EventsEmit(ctx, "chromium:install", line) }
 	// Chdir to the config dir here (a real run only), not in main(): relative
 	// paths inside the config (sqlite db, persona files) must resolve against it,
 	// but doing this in main() would also fire during wails binding generation
