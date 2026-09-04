@@ -22,7 +22,12 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $pinPath = Join-Path $here 'chromium-pin.json'
 if (-not (Test-Path $pinPath)) { throw "install-chromium: 找不到 $pinPath" }
 
-$pin = Get-Content $pinPath -Raw | ConvertFrom-Json
+# -Encoding UTF8 不是可省的：chromium-pin.json 是**无 BOM 的 UTF-8**，而 PowerShell 5.1
+# 的 Get-Content 在没有 BOM 时按当前 ANSI 代码页读。在中文/DBCS 区域（本机 gb2312）上，
+# pin 里的中文注释字段被误解码，一个双字节字符的首字节吞掉收尾引号，ConvertFrom-Json
+# 在偏移 188 处抛错——于是安装在这些机器上 100% 失败，而英文区域的机器与 CI 上一切正常。
+# 2026-09-04 真机实测：不带它必失败，带上读出 version=152.0.7977.64。
+$pin = Get-Content $pinPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $platform = 'win64'
 $entry = $pin.platforms.$platform
 $version = $pin.version

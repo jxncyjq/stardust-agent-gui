@@ -50,6 +50,39 @@ func TestTheEmbeddedDigestsMatchTheScriptsInThisRepo(t *testing.T) {
 	check(pinFile(), "安装脚本要读的版本清单")
 }
 
+// TestThePowerShellScriptReadsThePinAsUTF8 钉住 install-chromium.ps1 里读
+// chromium-pin.json 的那一行必须带 -Encoding UTF8。
+//
+// 为什么值得一条测试：chromium-pin.json 是**无 BOM 的 UTF-8**，而 PowerShell 5.1 的
+// Get-Content 在没有 BOM 时按当前 ANSI 代码页读。英文区域的机器与 CI 上一切正常，
+// 中文/DBCS 区域（gb2312 等）上 pin 里的中文注释被误解码，ConvertFrom-Json 抛错，
+// 安装 100% 失败——**这是一个按用户机器区域设置才现形的缺陷，常规 CI 永远看不到它**，
+// 2026-09-04 的真机验证才把它撞出来。删掉那个参数不会让任何别的测试红。
+func TestThePowerShellScriptReadsThePinAsUTF8(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(filepath.Join("..", "..", "scripts", "install-chromium.ps1"))
+	if err != nil {
+		t.Fatalf("read install-chromium.ps1: %v", err)
+	}
+	var line string
+	for _, candidate := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(candidate)
+		if strings.HasPrefix(trimmed, "$pin = Get-Content") {
+			line = trimmed
+			break
+		}
+	}
+	if line == "" {
+		t.Fatal("脚本里找不到读 chromium-pin.json 的那一行；它若改了名字，这条守卫要跟着改，不能删")
+	}
+	if !strings.Contains(line, "-Encoding UTF8") {
+		t.Errorf("读 pin 的那一行没带 -Encoding UTF8：\n%s\n"+
+			"PowerShell 5.1 会按 ANSI 代码页读无 BOM 的 UTF-8，中文区域的机器上 ConvertFrom-Json 会抛错，"+
+			"安装 100%% 失败，而英文机器与 CI 上一切正常。", line)
+	}
+}
+
 // TestEveryPlatformHasAScript：三个平台各有一份，且 Windows 走 .ps1、其余走 .sh。
 // 少一个平台的表现是「这台机器上装不了」，而不是编译错误。
 func TestEveryPlatformHasAScript(t *testing.T) {
