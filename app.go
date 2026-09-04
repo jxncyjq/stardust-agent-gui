@@ -176,7 +176,29 @@ func (a *App) ServeStatus() map[string]any {
 
 // apiGet is a helper for Go-side HTTP calls to the local service. It uses the
 // shared pooled client and fully drains the body so the connection is returned
-// to the idle pool for reuse.
+// to the idle pool for reuse, and it returns the body ONLY for a 2xx response.
+//
+// The status check is the point, not a detail. Without it every caller here
+// received a 404's {"error":...} as if the service had answered normally, and
+// what happened next depended on how the caller decoded it:
+//
+//   - the eight list callers decode into a slice, so an error OBJECT failed at
+//     json.Unmarshal — an accident, and one that reported "cannot unmarshal
+//     object into Go value of type []map[string]any" for what was really "the
+//     service says this does not exist";
+//   - GetTaskResult decodes into map[string]any, which an error body satisfies
+//     without complaint: "this task does not exist" reached the UI AS a task
+//     result;
+//   - BrowserSessions / BrowserSessionInfo hand the raw body to the frontend,
+//     so the error body impersonated session state — the address bar read
+//     parsed.url off it and got undefined.
+//
+// The last three were live defects, not hypotheticals (P4b final review, 收口5).
+// Both frontend consumers of the browser bindings already render a .catch, so
+// turning these into errors puts the failure on screen instead of a blank or a
+// lie. apiGetStatusChecked (app_session_events.go) exists because this helper
+// did not do this; it stays as the caller that also needs the body of a failed
+// response, and both truncate through truncateErrorBody.
 func (a *App) apiGet(path string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet, a.BaseURL()+path, nil)
 	if err != nil {
@@ -193,7 +215,14 @@ func (a *App) apiGet(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read %s response body: %w", path, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("get %s: status %d: %s", path, resp.StatusCode, truncateErrorBody(string(body)))
+	}
+	return body, nil
 }
 
 // ListSessions returns sessions for the default agent.
