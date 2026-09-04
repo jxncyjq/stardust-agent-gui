@@ -9,6 +9,7 @@ import { confirm, useConfirmStore } from '../../stores/confirmStore'
 import { usePluginConsentStore } from '../../stores/pluginConsentStore'
 import { AgentConfigPage } from './AgentConfigPage'
 import { PluginsPage } from './PluginsPage'
+import { BrowserPage } from './BrowserPage'
 
 // activeTaskCount returns how many tracked tasks are still in a non-terminal
 // state, so save can warn that a serve restart will interrupt them.
@@ -50,9 +51,8 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const { path, draft, dirty, saving, error, load, save } = useConfigStore()
   const editingAgent = useUIStore((s) => s.editingAgent)
   const closeAgent = useUIStore((s) => s.closeAgent)
-  const pluginsOpen = useUIStore((s) => s.pluginsOpen)
-  const openPlugins = useUIStore((s) => s.openPlugins)
-  const closePlugins = useUIStore((s) => s.closePlugins)
+  const settingsTab = useUIStore((s) => s.settingsTab)
+  const setSettingsTab = useUIStore((s) => s.setSettingsTab)
   // A plugin grant/deny/retry request is converging server-side and has no
   // abort semantics (see PluginConsentDialog's "no cancel while submitting"
   // rule) — closing the modal here would look like a cancel that never
@@ -122,7 +122,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       >
         <div className="flex items-center justify-between px-4 py-2 border-b border-border">
           <div className="flex flex-col">
-            <span className="text-sm font-semibold">{pluginsOpen ? '设置 · 插件授权' : '设置 · Agent 配置'}</span>
+            <span className="text-sm font-semibold">
+              {settingsTab === 'plugins' ? '设置 · 插件授权' : settingsTab === 'browser' ? '设置 · 浏览器' : '设置 · Agent 配置'}
+            </span>
             <span className="text-[10px] text-muted-foreground truncate max-w-[560px]" title={path}>{path}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -138,20 +140,28 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               // all — these were the last two clickable doors into that.
               <div className="flex items-center gap-1">
                 <button
-                  className={`interactive text-xs px-2 py-1 rounded disabled:opacity-50 disabled:hover:bg-transparent ${!pluginsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
-                  onClick={closePlugins}
+                  className={`interactive text-xs px-2 py-1 rounded disabled:opacity-50 disabled:hover:bg-transparent ${settingsTab === 'config' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                  onClick={() => setSettingsTab('config')}
                   disabled={consentInFlight}
                   title={consentInFlight ? '插件授权正在收敛，暂时无法切换' : undefined}
                 >
                   配置
                 </button>
                 <button
-                  className={`interactive text-xs px-2 py-1 rounded disabled:opacity-50 disabled:hover:bg-transparent ${pluginsOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
-                  onClick={openPlugins}
+                  className={`interactive text-xs px-2 py-1 rounded disabled:opacity-50 disabled:hover:bg-transparent ${settingsTab === 'plugins' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                  onClick={() => setSettingsTab('plugins')}
                   disabled={consentInFlight}
                   title={consentInFlight ? '插件授权正在收敛，暂时无法切换' : undefined}
                 >
                   插件
+                </button>
+                <button
+                  className={`interactive text-xs px-2 py-1 rounded disabled:opacity-50 disabled:hover:bg-transparent ${settingsTab === 'browser' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted'}`}
+                  onClick={() => setSettingsTab('browser')}
+                  disabled={consentInFlight}
+                  title={consentInFlight ? '插件授权正在收敛，暂时无法切换' : undefined}
+                >
+                  浏览器
                 </button>
               </div>
             )}
@@ -168,8 +178,10 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4">
-          {pluginsOpen ? (
+          {settingsTab === 'plugins' ? (
             <PluginsPage />
+          ) : settingsTab === 'browser' ? (
+            <BrowserPage />
           ) : (
             <>
               {!draft && !error && <p className="text-xs text-muted-foreground py-4">加载中…</p>}
@@ -179,13 +191,14 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
           )}
         </div>
 
-        {!pluginsOpen && error && <p className="text-xs text-destructive px-4 py-1 break-all">保存/加载失败：{error}</p>}
+        {settingsTab === 'config' && error && <p className="text-xs text-destructive px-4 py-1 break-all">保存/加载失败：{error}</p>}
 
-        {/* The plugin panel acts immediately through its own server calls
-            (grant/deny), independent of this draft's save/restart flow, so
-            it has no place in this footer — closing via the X or Esc is
-            enough. */}
-        {!pluginsOpen && (
+        {/* The plugin panel and the browser page each act on their own
+            (plugin grant/deny calls; a Chromium install that runs
+            independently in chromiumStore), independent of this draft's
+            save/restart flow, so neither has a place in this footer —
+            closing via the X or Esc is enough. */}
+        {settingsTab === 'config' && (
           <div className="flex items-center justify-end gap-2 px-4 py-2 border-t border-border">
             <button className="interactive text-xs px-3 py-1 rounded hover:bg-muted text-muted-foreground" onClick={onClose}>取消</button>
             <button

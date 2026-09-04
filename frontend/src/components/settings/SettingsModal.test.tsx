@@ -52,15 +52,14 @@ vi.mock('../../stores/configStore', () => ({
 
 // uiStore is consumed via selector (useUIStore((s) => s.editingAgent)), so the
 // mock must accept and apply a selector function like zustand does.
-// pluginsOpen/openPlugins/closePlugins were added to the real store
-// alongside the plugin tab (see uiStore.ts) — this mock must carry them too,
-// or every field SettingsModal reads off it resolves to undefined.
+// settingsTab/setSettingsTab were added to the real store alongside the
+// plugin/browser tabs (see uiStore.ts) — this mock must carry them too, or
+// every field SettingsModal reads off it resolves to undefined.
 const uiState = vi.hoisted(() => ({
   editingAgent: null as any,
   closeAgent: vi.fn(),
-  pluginsOpen: false,
-  openPlugins: vi.fn(),
-  closePlugins: vi.fn(),
+  settingsTab: 'config' as 'config' | 'plugins' | 'browser',
+  setSettingsTab: vi.fn(),
 }))
 vi.mock('../../stores/uiStore', () => ({
   useUIStore: vi.fn((selector: (s: typeof uiState) => unknown) => selector(uiState)),
@@ -105,9 +104,8 @@ beforeEach(() => {
   useConfirmStore.setState({ request: null })
   usePluginConsentStore.setState({ inFlight: 0 })
   uiState.editingAgent = null
-  uiState.pluginsOpen = false
-  uiState.openPlugins.mockReset()
-  uiState.closePlugins.mockReset()
+  uiState.settingsTab = 'config'
+  uiState.setSettingsTab.mockReset()
   uiState.closeAgent.mockReset()
 })
 
@@ -144,7 +142,7 @@ describe('SettingsModal Esc', () => {
   // its in-flight state, the exact window Rule 3 says must offer no way to
   // back out — Escape included.
   it('does NOT close on Escape while a plugin consent request is converging (SettingsModal -> PluginsPage -> PluginConsentDialog)', async () => {
-    uiState.pluginsOpen = true
+    uiState.settingsTab = 'plugins'
     mocks.ListPlugins.mockResolvedValue([makePlugin({ name: 'sample-plugin', state: 'unauthorized' })])
     mocks.GrantPlugin.mockReturnValue(new Promise(() => {})) // never resolves — the convergence wait
 
@@ -171,7 +169,7 @@ describe('SettingsModal Esc', () => {
   // path (not the dialog submit path the test above uses) so the spinner has
   // no buttons and no overlay, then tries every other door.
   it('does NOT close via the backdrop click or the header X while a row-level convergence retry is in flight, and the X is disabled', async () => {
-    uiState.pluginsOpen = true
+    uiState.settingsTab = 'plugins'
     mocks.ListPlugins.mockResolvedValue([makePlugin({ name: 'sample-plugin', state: 'unauthorized' })])
     mocks.GrantPlugin.mockResolvedValueOnce(
       main.ConsentResultDTO.createFrom({
@@ -217,8 +215,8 @@ describe('SettingsModal Esc', () => {
 })
 
 describe('SettingsModal — plugin tab wiring', () => {
-  it('shows the plugin panel and hides the config footer when pluginsOpen is true', async () => {
-    uiState.pluginsOpen = true
+  it('shows the plugin panel and hides the config footer when settingsTab is plugins', async () => {
+    uiState.settingsTab = 'plugins'
     mocks.ListPlugins.mockResolvedValue([])
     render(<SettingsModal open onClose={vi.fn()} />)
 
@@ -229,17 +227,27 @@ describe('SettingsModal — plugin tab wiring', () => {
     expect(screen.queryByRole('button', { name: '保存并重启' })).not.toBeInTheDocument()
   })
 
-  it('shows the config sections (not the plugin panel) when pluginsOpen is false', () => {
-    uiState.pluginsOpen = false
+  it('shows the config sections (not the plugin panel) when settingsTab is config', () => {
+    uiState.settingsTab = 'config'
     render(<SettingsModal open onClose={vi.fn()} />)
     expect(screen.queryByText('插件授权')).not.toBeInTheDocument()
   })
 
-  it('clicking "插件" calls openPlugins, clicking "配置" calls closePlugins', () => {
+  it('clicking "插件"/"配置"/"浏览器" each call setSettingsTab with the right tab', () => {
     render(<SettingsModal open onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: '插件' }))
-    expect(uiState.openPlugins).toHaveBeenCalledTimes(1)
+    expect(uiState.setSettingsTab).toHaveBeenCalledWith('plugins')
     fireEvent.click(screen.getByRole('button', { name: '配置' }))
-    expect(uiState.closePlugins).toHaveBeenCalledTimes(1)
+    expect(uiState.setSettingsTab).toHaveBeenCalledWith('config')
+    fireEvent.click(screen.getByRole('button', { name: '浏览器' }))
+    expect(uiState.setSettingsTab).toHaveBeenCalledWith('browser')
+  })
+})
+
+describe('SettingsModal — browser tab', () => {
+  it('浏览器 tab 打得开', async () => {
+    uiState.settingsTab = 'browser'
+    render(<SettingsModal open onClose={vi.fn()} />)
+    expect(screen.getByText('内置浏览器')).toBeInTheDocument()
   })
 })
