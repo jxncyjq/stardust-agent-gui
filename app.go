@@ -10,9 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"legionAgentGUI/internal/chromium"
 )
 
 type App struct {
@@ -21,6 +24,35 @@ type App struct {
 	cfgPath       string
 	client        *http.Client
 	browserStream *BrowserStreamManager // per-session screencast SSE forwarder; nil until serve starts
+
+	// chromiumPath 回答「现在有没有内置浏览器」。它是字段而不是直接调
+	// chromium.Path()，只为一件事：让「已装时该不该拒绝安装」这条判断可测。
+	// chromium.Path() 按 os.Executable() 的同级目录找，而 go test 的二进制在临时
+	// 目录里——它在测试下**默认**为空，以它为前提的断言会静默跳过；测试要让它非空
+	// 就得自己在测试二进制旁边放一个（TestInstallRefusesWhenABrowserIsAlreadyThere
+	// 正是这么做的）。
+	// NewApp 填 chromium.Path，生产路径逐字不变。
+	chromiumPath func() string
+
+	// installChromium 执行那次真正的安装。它是字段而不是直接调 chromium.Install，
+	// 理由与 chromiumPath 同类但更硬：chromium.Install 会去 GitHub 取脚本并**执行
+	// 它**（一次 150MB 的下载）。任何走到它的测试都会变成一个下载器，在有网络的 CI
+	// 上尤其明显，而那些测试想验的其实只是「前置检查放没放行」。
+	// NewApp 填 chromium.Install，生产路径逐字不变。
+	installChromium func(ctx context.Context, client *http.Client, progress func(string)) error
+
+	// emitInstall 把安装的一行送到界面（"chromium:install" 事件）。**nil 表示界面还
+	// 没起来**——那时候不该开始一次没人看得到过程和结果的 150MB 安装，
+	// runChromiumInstall 会直接拒绝。
+	//
+	// 它是字段而不是直接调 runtime.EventsEmit：那个函数要一个由 Wails 注入的 ctx，
+	// 测试里给不出（拿一个普通 ctx 调它会 panic），于是「安装完成：/安装失败：」这两个
+	// 与前端唯一的约定就没有任何测试跨得过去。startup 填生产实现。
+	emitInstall func(line string)
+
+	// installing 挡住「同时两次安装」。前端那个禁用的按钮不算护栏：界面一重载
+	// （wails dev 热重载 / Ctrl+R）store 就回到初始态，而这边那次安装还在跑。
+	installing atomic.Bool
 }
 
 func NewApp(cfgPath string) *App {
@@ -37,8 +69,10 @@ func NewApp(cfgPath string) *App {
 	transport.IdleConnTimeout = 90 * time.Second
 
 	app := &App{
-		serve:   NewServeManager(),
-		cfgPath: cfgPath,
+		serve:           NewServeManager(),
+		cfgPath:         cfgPath,
+		chromiumPath:    chromium.Path,
+		installChromium: chromium.Install,
 	}
 	// Authenticate at the TRANSPORT, not at each call site. The serve this app
 	// starts mints a one-time loopback bearer token, and every request to it
@@ -47,29 +81,45 @@ func NewApp(cfgPath string) *App {
 	// 401" the first time anybody tried to send a message. Attaching it here
 	// makes the next call site correct by construction instead of by memory.
 	app.client = &http.Client{
-		Transport: &loopbackAuthTransport{base: transport, token: app.serve.Token},
+		Transport: &loopbackAuthTransport{base: transport, token: app.serve.Token, baseURL: app.BaseURL},
 		Timeout:   120 * time.Second,
 	}
 	return app
 }
 
-// loopbackAuthTransport adds the embedded serve's bearer token to every
-// request that does not already carry one.
+// loopbackAuthTransport adds the embedded serve's bearer token to requests
+// addressed to THAT SERVE, and to nothing else.
 //
-// The token is read PER REQUEST rather than captured: a Restart mints a fresh
-// one, and a captured token would be rejected by the serve that replaced it.
-// An empty token means a serve that minted none (a deployment with its own
-// admin_token, or one not running in loopback-hardening mode) — that sends no
-// Authorization header at all rather than an empty bearer, which is what keeps
-// the non-hardened path byte-identical to what it was.
+// Both the token and the serve's address are read PER REQUEST rather than
+// captured: a Restart mints a fresh token on a fresh random port, and captured
+// values would leave this transport authenticating against a serve that no
+// longer exists (and comparing addresses against a dead port).
+//
+// The destination check is SCOPE, not a fallback for an error. This client is
+// shared with chromium.Install, which fetches its install script from
+// raw.githubusercontent.com: while the header went out unconditionally, the
+// token was handed to a third-party public host — and that token drives the
+// user's agent (list sessions, read the workspace through /v1/files, run
+// tasks). "No header when we cannot prove the request is going home" is the
+// safe default for a credential, not zero-value-pretending-to-be-fine; nothing
+// is being swallowed here, and a genuine auth failure still surfaces as the
+// serve's own 401. The same reasoning covers the two other no-header cases: a
+// serve that is not running (no trustworthy address to compare against), and a
+// serve that minted no token at all (a deployment with its own admin_token, or
+// one not in loopback-hardening mode) — that sends no Authorization header
+// rather than an empty bearer, which keeps the non-hardened path
+// byte-identical to what it was.
 type loopbackAuthTransport struct {
 	base  http.RoundTripper
 	token func() string
+	// baseURL is the embedded serve's address, e.g. "http://127.0.0.1:53412".
+	// Nil or empty means "no known serve", which attaches nothing.
+	baseURL func() string
 }
 
 func (t *loopbackAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	tok := t.token()
-	if tok == "" || req.Header.Get("Authorization") != "" {
+	if tok == "" || req.Header.Get("Authorization") != "" || !t.addressesEmbeddedServe(req.URL) {
 		return t.base.RoundTrip(req)
 	}
 	// Clone before writing: RoundTrip must not mutate the caller's request.
@@ -78,8 +128,59 @@ func (t *loopbackAuthTransport) RoundTrip(req *http.Request) (*http.Response, er
 	return t.base.RoundTrip(cloned)
 }
 
+// addressesEmbeddedServe reports whether u is the serve this app started.
+//
+// The match is on host AND port, both. A looser test — "the host starts with
+// 127.", say — would hand the agent's credential to every other service
+// listening on this machine's loopback, which is exactly the class of mistake
+// this check exists to end.
+func (t *loopbackAuthTransport) addressesEmbeddedServe(u *url.URL) bool {
+	if u == nil || t.baseURL == nil {
+		return false
+	}
+	base, err := url.Parse(t.baseURL())
+	if err != nil {
+		return false
+	}
+	self := authorityOf(base)
+	if self == "" {
+		return false
+	}
+	return authorityOf(u) == self
+}
+
+// authorityOf normalizes a URL to "host:port", filling in the scheme's default
+// port so that "http://127.0.0.1/x" and "http://127.0.0.1:80/x" compare equal.
+// It returns "" when there is no usable address — no host, an unknown scheme
+// with no explicit port, or port 0, which is what BaseURL reports while the
+// serve is not listening. Callers read "" as "not the embedded serve".
+func authorityOf(u *url.URL) string {
+	host := u.Hostname()
+	if host == "" {
+		return ""
+	}
+	port := u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		default:
+			return ""
+		}
+	}
+	if port == "0" {
+		return ""
+	}
+	return host + ":" + port
+}
+
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// 与 ctx 一起填：安装的输出只有这一条路能到界面，而它要的正是这个 ctx。在此之前
+	// 它是 nil，runChromiumInstall 会拒绝开工（见那里的注释）。
+	a.emitInstall = func(line string) { runtime.EventsEmit(ctx, "chromium:install", line) }
 	// Chdir to the config dir here (a real run only), not in main(): relative
 	// paths inside the config (sqlite db, persona files) must resolve against it,
 	// but doing this in main() would also fire during wails binding generation

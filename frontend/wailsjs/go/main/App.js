@@ -174,6 +174,10 @@ export function ReadWorkspaceFile(arg1, arg2) {
   return window['go']['main']['App']['ReadWorkspaceFile'](arg1, arg2);
 }
 
+export function ReinstallBundledChromium() {
+  return window['go']['main']['App']['ReinstallBundledChromium']();
+}
+
 export function RenameProject(arg1, arg2) {
   return window['go']['main']['App']['RenameProject'](arg1, arg2);
 }

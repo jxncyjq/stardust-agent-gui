@@ -16,6 +16,7 @@ import { usePreviewStore } from './stores/previewStore'
 import { useBrowserStore } from './stores/browserStore'
 import { useBrowserSession } from './hooks/useBrowserSession'
 import { useHtmlPreviewEvents } from './hooks/useHtmlPreviewEvents'
+import { useChromiumInstall } from './hooks/useChromiumInstall'
 import { cn } from './lib/utils'
 import { SunIcon, MoonIcon } from './components/icons'
 
@@ -107,6 +108,7 @@ function App() {
   const browserSessionId = useBrowserStore((s) => s.sessionId)
   useBrowserSession()
   useHtmlPreviewEvents()
+  useChromiumInstall()
 
   // Agent 开了一个**新的**浏览器会话时，把收起来的栏重新打开：那一刻用户多半想看
   // 一眼。同一个会话里反复的事件不会重新打开它——那会变成一个赶不走的面板。

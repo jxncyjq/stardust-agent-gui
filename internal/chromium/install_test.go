@@ -19,8 +19,25 @@ import (
 // 它断掉的症状是「装不上」，而错误信息说的是「摘要不符」——指向网络或 GitHub，与
 // 真正的原因（我自己刚改了脚本）隔着十万八千里。所以这条测试直接拿仓库里的文件算，
 // 与编译进二进制的那个值对。
+// 它管的不只是脚本：chromium-pin.json 也钉着摘要，也走同一条取回 + 校验的路。漏掉它
+// 的症状比漏掉脚本还难认——**所有平台**同时装不上（每一份都对不上），而常规 CI 不红。
 func TestTheEmbeddedDigestsMatchTheScriptsInThisRepo(t *testing.T) {
 	t.Parallel()
+
+	check := func(f remoteFile, who string) {
+		// 测试跑在 internal/chromium 里，脚本在仓库根的 scripts/ 下。
+		onDisk := filepath.Join("..", "..", f.Path)
+		data, err := os.ReadFile(onDisk)
+		if err != nil {
+			t.Fatalf("read %s: %v", onDisk, err)
+		}
+		sum := sha256.Sum256(data)
+		if got := hex.EncodeToString(sum[:]); got != f.SHA256 {
+			t.Errorf("%s（%s）的摘要与编译进二进制的值不符：\n仓库里 = %s\n代码里 = %s\n"+
+				"改了 scripts/ 下的文件就要一并改这边钉住的摘要，否则装的时候会被拒绝执行，"+
+				"而报错指向的是网络，不是这次改动。", f.Path, who, got, f.SHA256)
+		}
+	}
 
 	seen := map[string]bool{}
 	for goos, script := range installScripts() {
@@ -28,20 +45,9 @@ func TestTheEmbeddedDigestsMatchTheScriptsInThisRepo(t *testing.T) {
 			continue
 		}
 		seen[script.Path] = true
-
-		// 测试跑在 internal/chromium 里，脚本在仓库根的 scripts/ 下。
-		onDisk := filepath.Join("..", "..", script.Path)
-		data, err := os.ReadFile(onDisk)
-		if err != nil {
-			t.Fatalf("read %s: %v", onDisk, err)
-		}
-		sum := sha256.Sum256(data)
-		if got := hex.EncodeToString(sum[:]); got != script.SHA256 {
-			t.Errorf("%s（%s 用的那份）的摘要与编译进二进制的值不符：\n仓库里 = %s\n代码里 = %s\n"+
-				"改了脚本就要一并改 installScripts()，否则装的时候会被拒绝执行，"+
-				"而报错指向的是网络，不是这次改动。", script.Path, goos, got, script.SHA256)
-		}
+		check(script.remoteFile, goos+" 用的那份")
 	}
+	check(pinFile(), "安装脚本要读的版本清单")
 }
 
 // TestEveryPlatformHasAScript：三个平台各有一份，且 Windows 走 .ps1、其余走 .sh。

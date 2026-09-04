@@ -88,6 +88,8 @@ export function ReadHTMLFile(arg1:string):Promise<string>;
 
 export function ReadWorkspaceFile(arg1:string,arg2:string):Promise<main.WorkspaceFile>;
 
+export function ReinstallBundledChromium():Promise<void>;
+
 export function RenameProject(arg1:string,arg2:string):Promise<void>;
 
 export function RenameSession(arg1:string,arg2:string):Promise<void>;
