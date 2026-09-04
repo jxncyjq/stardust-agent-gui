@@ -77,7 +77,37 @@ func (a *App) apiGetStatusChecked(path string) ([]byte, error) {
 		return nil, fmt.Errorf("read %s response body: %w", path, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("get %s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("get %s: status %d: %s", path, resp.StatusCode, truncateErrorBody(string(body)))
 	}
 	return body, nil
+}
+
+// maxErrorBodyRunes bounds how much of a failed response's body reaches the
+// error string.
+//
+// The bound exists because this error is USER-FACING: it travels through the
+// Wails binding into the trajectory view's failure notice. A server answering
+// 500 with a stack trace or an HTML error page would otherwise put all of it
+// on screen — the plugin panel has already been through this once, with a
+// 305-character chain rendered raw (fixed in #48). 512 runes is enough for the
+// {"error":...} bodies this service actually returns, and short enough that a
+// pathological one cannot take over the panel.
+const maxErrorBodyRunes = 512
+
+// truncateErrorBody trims a response body for inclusion in an error string,
+// cutting it to maxErrorBodyRunes and SAYING SO when it does.
+//
+// Announcing the cut is the point: a body that was silently shortened reads as
+// the whole of what the server said, and someone diagnosing a failure would
+// take a truncated JSON document for a malformed one. Runes, not bytes, so a
+// cut never lands inside a multi-byte character and produces mojibake in the
+// notice.
+func truncateErrorBody(body string) string {
+	trimmed := strings.TrimSpace(body)
+	runes := []rune(trimmed)
+	if len(runes) <= maxErrorBodyRunes {
+		return trimmed
+	}
+	return fmt.Sprintf("%s… (truncated, %d of %d characters shown)",
+		string(runes[:maxErrorBodyRunes]), maxErrorBodyRunes, len(runes))
 }
