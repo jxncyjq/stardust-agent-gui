@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"legionAgentGUI/internal/chromium"
 )
 
 type App struct {
@@ -21,6 +23,13 @@ type App struct {
 	cfgPath       string
 	client        *http.Client
 	browserStream *BrowserStreamManager // per-session screencast SSE forwarder; nil until serve starts
+
+	// chromiumPath 回答「现在有没有内置浏览器」。它是字段而不是直接调
+	// chromium.Path()，只为一件事：让「已装时该不该拒绝安装」这条判断可测。
+	// chromium.Path() 按 os.Executable() 的同级目录找，而 go test 的二进制在临时
+	// 目录里——它在测试下恒为空，任何以它为前提的断言都会静默跳过。
+	// NewApp 填 chromium.Path，生产路径逐字不变。
+	chromiumPath func() string
 }
 
 func NewApp(cfgPath string) *App {
@@ -37,8 +46,9 @@ func NewApp(cfgPath string) *App {
 	transport.IdleConnTimeout = 90 * time.Second
 
 	app := &App{
-		serve:   NewServeManager(),
-		cfgPath: cfgPath,
+		serve:        NewServeManager(),
+		cfgPath:      cfgPath,
+		chromiumPath: chromium.Path,
 	}
 	// Authenticate at the TRANSPORT, not at each call site. The serve this app
 	// starts mints a one-time loopback bearer token, and every request to it
