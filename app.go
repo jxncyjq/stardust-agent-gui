@@ -81,35 +81,99 @@ func NewApp(cfgPath string) *App {
 	// 401" the first time anybody tried to send a message. Attaching it here
 	// makes the next call site correct by construction instead of by memory.
 	app.client = &http.Client{
-		Transport: &loopbackAuthTransport{base: transport, token: app.serve.Token},
+		Transport: &loopbackAuthTransport{base: transport, token: app.serve.Token, baseURL: app.BaseURL},
 		Timeout:   120 * time.Second,
 	}
 	return app
 }
 
-// loopbackAuthTransport adds the embedded serve's bearer token to every
-// request that does not already carry one.
+// loopbackAuthTransport adds the embedded serve's bearer token to requests
+// addressed to THAT SERVE, and to nothing else.
 //
-// The token is read PER REQUEST rather than captured: a Restart mints a fresh
-// one, and a captured token would be rejected by the serve that replaced it.
-// An empty token means a serve that minted none (a deployment with its own
-// admin_token, or one not running in loopback-hardening mode) — that sends no
-// Authorization header at all rather than an empty bearer, which is what keeps
-// the non-hardened path byte-identical to what it was.
+// Both the token and the serve's address are read PER REQUEST rather than
+// captured: a Restart mints a fresh token on a fresh random port, and captured
+// values would leave this transport authenticating against a serve that no
+// longer exists (and comparing addresses against a dead port).
+//
+// The destination check is SCOPE, not a fallback for an error. This client is
+// shared with chromium.Install, which fetches its install script from
+// raw.githubusercontent.com: while the header went out unconditionally, the
+// token was handed to a third-party public host — and that token drives the
+// user's agent (list sessions, read the workspace through /v1/files, run
+// tasks). "No header when we cannot prove the request is going home" is the
+// safe default for a credential, not zero-value-pretending-to-be-fine; nothing
+// is being swallowed here, and a genuine auth failure still surfaces as the
+// serve's own 401. The same reasoning covers the two other no-header cases: a
+// serve that is not running (no trustworthy address to compare against), and a
+// serve that minted no token at all (a deployment with its own admin_token, or
+// one not in loopback-hardening mode) — that sends no Authorization header
+// rather than an empty bearer, which keeps the non-hardened path
+// byte-identical to what it was.
 type loopbackAuthTransport struct {
 	base  http.RoundTripper
 	token func() string
+	// baseURL is the embedded serve's address, e.g. "http://127.0.0.1:53412".
+	// Nil or empty means "no known serve", which attaches nothing.
+	baseURL func() string
 }
 
 func (t *loopbackAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	tok := t.token()
-	if tok == "" || req.Header.Get("Authorization") != "" {
+	if tok == "" || req.Header.Get("Authorization") != "" || !t.addressesEmbeddedServe(req.URL) {
 		return t.base.RoundTrip(req)
 	}
 	// Clone before writing: RoundTrip must not mutate the caller's request.
 	cloned := req.Clone(req.Context())
 	cloned.Header.Set("Authorization", "Bearer "+tok)
 	return t.base.RoundTrip(cloned)
+}
+
+// addressesEmbeddedServe reports whether u is the serve this app started.
+//
+// The match is on host AND port, both. A looser test — "the host starts with
+// 127.", say — would hand the agent's credential to every other service
+// listening on this machine's loopback, which is exactly the class of mistake
+// this check exists to end.
+func (t *loopbackAuthTransport) addressesEmbeddedServe(u *url.URL) bool {
+	if u == nil || t.baseURL == nil {
+		return false
+	}
+	base, err := url.Parse(t.baseURL())
+	if err != nil {
+		return false
+	}
+	self := authorityOf(base)
+	if self == "" {
+		return false
+	}
+	return authorityOf(u) == self
+}
+
+// authorityOf normalizes a URL to "host:port", filling in the scheme's default
+// port so that "http://127.0.0.1/x" and "http://127.0.0.1:80/x" compare equal.
+// It returns "" when there is no usable address — no host, an unknown scheme
+// with no explicit port, or port 0, which is what BaseURL reports while the
+// serve is not listening. Callers read "" as "not the embedded serve".
+func authorityOf(u *url.URL) string {
+	host := u.Hostname()
+	if host == "" {
+		return ""
+	}
+	port := u.Port()
+	if port == "" {
+		switch u.Scheme {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		default:
+			return ""
+		}
+	}
+	if port == "0" {
+		return ""
+	}
+	return host + ":" + port
 }
 
 func (a *App) startup(ctx context.Context) {
