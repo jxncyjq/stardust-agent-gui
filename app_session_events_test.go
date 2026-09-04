@@ -131,3 +131,76 @@ func TestGetSessionEventsRejectsEmptySessionIDWithoutHittingTheServer(t *testing
 		t.Errorf("空 session id 仍然发出了请求：%v", requested)
 	}
 }
+
+// 注释与代码必须对得上：apiGetStatusChecked 的文档注释写着错误里带的是
+// "the (truncated) body"，而它一度把整个响应体原样塞进错误。本仓把注释当契约用，
+// 所以这里钉的不是「短一点好看」，是那句话为真。
+//
+// 为什么值得真截断而不是把 (truncated) 从注释里删掉：这个错误串会一路走到界面上
+// （2026-09-04 的走查刚见过一条 305 字符、含绝对路径的错误链铺满插件面板）。
+// 一个 500 带着几十 KB 响应体的服务端，会把那几十 KB 送进 GUI 的错误提示。
+func TestStatusCheckedErrorTruncatesALongBody(t *testing.T) {
+	huge := strings.Repeat("x", 5000)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(huge))
+	}))
+	defer srv.Close()
+
+	app := newTestAppWithBaseURL(t, srv.URL)
+	_, err := app.GetSessionEvents("sess-1", 0, 0)
+	if err == nil {
+		t.Fatal("500 没有变成错误")
+	}
+	msg := err.Error()
+	if len(msg) > 1024 {
+		t.Errorf("错误串 %d 字节，未截断：注释承诺的是 (truncated) body，而这条会把整个响应体送进界面", len(msg))
+	}
+	if !strings.Contains(msg, "status 500") {
+		t.Errorf("错误串丢了状态码，排查者无从判断是哪一类失败：%.200s", msg)
+	}
+	if !strings.Contains(msg, "xxx") {
+		t.Errorf("错误串一点响应体都没留下，截断变成了丢弃：%.200s", msg)
+	}
+}
+
+// 截断要说出来：一段被切掉尾巴却看不出被切过的文本，会让排查者以为服务端就回了这些。
+func TestStatusCheckedTruncationSaysSo(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte(strings.Repeat("y", 3000)))
+	}))
+	defer srv.Close()
+
+	app := newTestAppWithBaseURL(t, srv.URL)
+	_, err := app.GetSessionEvents("sess-1", 0, 0)
+	if err == nil {
+		t.Fatal("502 没有变成错误")
+	}
+	if !strings.Contains(err.Error(), "truncated") {
+		t.Errorf("截断了却没有任何标记：%.200s", err.Error())
+	}
+}
+
+// 没超长的响应体一个字都不能少：截断只在超过上限时发生，正常的 404 错误体
+// （{"error":...}）要原样可读，否则排查者看到的是被切过的 JSON。
+func TestStatusCheckedKeepsAShortBodyIntact(t *testing.T) {
+	body := `{"error":"session \"sess-nope\" not found"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	app := newTestAppWithBaseURL(t, srv.URL)
+	_, err := app.GetSessionEvents("sess-nope", 0, 0)
+	if err == nil {
+		t.Fatal("404 没有变成错误")
+	}
+	if !strings.Contains(err.Error(), body) {
+		t.Errorf("短响应体被动过：%.300s", err.Error())
+	}
+	if strings.Contains(err.Error(), "truncated") {
+		t.Errorf("没超长却标了 truncated：%.300s", err.Error())
+	}
+}
