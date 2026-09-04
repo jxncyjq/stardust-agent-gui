@@ -20,6 +20,15 @@ describe('BrowserPage', () => {
     useChromiumStore.setState({ status: 'unknown', path: '', lines: [], error: null })
   })
 
+  // 'unknown' 是「还没问过后端」，'absent' 是「问过之后确认没有」——两者不能给用户
+  // 同一个界面：unknown 下点「安装」必然撞上 Go 侧「已经有浏览器」的拒绝，把好端端的
+  // 机器渲染成「安装失败」。
+  it('还没问过后端时不给出必然失败的安装按钮，只说明正在检查', () => {
+    render(<BrowserPage />)
+    expect(screen.queryByRole('button', { name: '安装内置浏览器' })).not.toBeInTheDocument()
+    expect(screen.getByText(/正在检查/)).toBeInTheDocument()
+  })
+
   it('没有浏览器时给安装入口，并说明现在用的是系统浏览器', () => {
     useChromiumStore.setState({ status: 'absent' })
     render(<BrowserPage />)

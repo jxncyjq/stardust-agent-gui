@@ -38,6 +38,10 @@ export function BrowserPage() {
         </span>
       </div>
 
+      {status === 'unknown' && (
+        <p className="text-xs text-muted-foreground">正在检查这次安装有没有自带浏览器…</p>
+      )}
+
       {status === 'absent' && (
         <p className="text-xs text-muted-foreground">
           这次安装没有自带浏览器，Agent 会用系统上装着的那个。
@@ -66,6 +70,12 @@ export function BrowserPage() {
         {status === 'installing' ? (
           <button type="button" disabled className="interactive text-xs px-2 py-1 rounded border border-input opacity-50">
             安装中…
+          </button>
+        ) : status === 'unknown' ? (
+          // 还没问过后端，不能给一个必然失败的动作：这台机器可能本来就装好了浏览器，
+          // 点下去会撞上 Go 侧「已经有浏览器」的拒绝，把好端端的状态渲染成「安装失败」。
+          <button type="button" disabled className="interactive text-xs px-2 py-1 rounded border border-input opacity-50">
+            检查中…
           </button>
         ) : status === 'installed' ? (
           <button
