@@ -16,7 +16,9 @@
 - **`wails dev` / `wails build` 必须带 `-m`**（`go mod tidy` 不认 go.work 的 replace）。
 - **错误链不裸铺**：失败原文一律「人话一句 + `<details>` 折叠原文」（本仓 #48 定的规矩）。
 - **不解析脚本输出**：不做百分比、不做进度条。脚本写什么就显示什么。
-- **不改 `internal/chromium`**：覆盖能力已在脚本里（`install-chromium.ps1:66` 与 `install-chromium.sh:98` 都先清空目标再装），那一层不需要知道是不是重装。
+- **~~不改 `internal/chromium`~~ —— 2026-09-04 终审后松绑，见下**：原约束的理由是「覆盖能力已在脚本里（`install-chromium.ps1:66` 与 `install-chromium.sh:98` 都先清空目标再装），那一层不需要知道是不是重装」——它约束的是**重装语义**，不是**输出通道**。
+  终审发现 `install.go:153` 用 `cmd.CombinedOutput()`，输出在脚本**退出之后**才一次性回调，于是「几分钟里一直看得到进度」这条 Goal 根本没实现（界面几分钟一个字不变，结束瞬间 200 行齐出）。**允许改 `internal/chromium/install.go` 把执行改成流式**（`StdoutPipe`+`Start`+`Scanner`+`Wait`），并配一条「脚本退出前 progress 至少被调用一次」的测试。重装语义仍然不许动。
+  这条错在规划阶段：spec 把 gui#42 的「逐行发出」当既有能力直接引用，**没有核到代码**——而 `app_chromium.go` 的注释也这么写着，注释在说谎。
 
 ---
 
