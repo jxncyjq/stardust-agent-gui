@@ -40,18 +40,45 @@ const (
 	scriptRef = "c285b8d1add70a3ff3e66e32dd5a8e759d38cdbb"
 )
 
-// installScript 是一个平台的安装脚本：仓库内路径、内容摘要，以及怎么执行它。
-type installScript struct {
-	// Path 是脚本在仓库里的路径。
+// remoteFile 是一份**随版本钉死**的仓库文件：仓库内路径 + 内容摘要。
+//
+// 安装要取回的每一份文件都是这个形状，因为它们受同一条规矩管：取回来的内容必须与
+// 编译进二进制的摘要逐字相符，不符就拒绝执行。
+type remoteFile struct {
+	// Path 是文件在仓库里的路径。
 	Path string
-	// SHA256 是随这个版本一起发出的那份脚本的摘要。取回来的内容必须与它相符。
+	// SHA256 是随这个版本一起发出的那份内容的摘要。取回来的内容必须与它相符。
 	//
-	// 它由 TestTheEmbeddedDigestsMatchTheScriptsInThisRepo 守着：改了脚本却忘了
-	// 改这里，测试立刻红——否则症状是「装不上」，而错误信息会指向网络或 GitHub，
-	// 与真正的原因隔着十万八千里。
+	// 它由 TestTheEmbeddedDigestsMatchTheScriptsInThisRepo 守着：改了 scripts/ 下
+	// 的文件却忘了改这里，测试立刻红——否则症状是「装不上」，而错误信息会指向网络
+	// 或 GitHub，与真正的原因隔着十万八千里。
 	SHA256 string
+}
+
+// installScript 是一个平台的安装脚本：钉住的文件，以及怎么执行它。
+type installScript struct {
+	remoteFile
 	// Command 把脚本文件与目标目录拼成一条命令。
 	Command func(scriptPath, appDir string) *exec.Cmd
+}
+
+// pinFile 是安装脚本要读的版本清单（chromium-pin.json）：装哪个版本、每个平台的包
+// 地址与摘要，都写在它里面。
+//
+// 两份安装脚本都在**自己所在的那个目录**里找它（ps1 走
+// `Split-Path -Parent $MyInvocation.MyCommand.Path`，sh 走 `dirname "$BASH_SOURCE"`），
+// 找不到就直接 throw / die。所以它必须与脚本一起落进同一个临时目录——只取脚本，安装
+// 100% 失败在第一行。
+//
+// **它和脚本一样必须校验摘要。** 它不是一份无关紧要的配置：它是「装哪个浏览器」的
+// 唯一来源（URL + 摘要）。一个不校验的 pin 文件等于让任何能改那个地址内容的人指定
+// 用户机器上装什么——脚本会老老实实按它给的 URL 下载、按它给的摘要「校验」通过，
+// 于是脚本里那套摘要校验形同虚设。校验脚本却不校验 pin，等于锁了门却把钥匙挂在门上。
+func pinFile() remoteFile {
+	return remoteFile{
+		Path:   "scripts/chromium-pin.json",
+		SHA256: "9e3a728ba275f80e38892501de8c78f546b260fdbf97dba1e84b884c7389aa43",
+	}
 }
 
 // installScripts 按 GOOS 给出该平台的那一份。
@@ -59,41 +86,75 @@ type installScript struct {
 // Windows 的 .ps1 与 unix 的 .sh 不是同一段代码的两个格式，而是两份实现（见
 // scripts/ 下各自的抬头），所以这里按平台取一份，而不是取一份再想办法跨平台跑。
 func installScripts() map[string]installScript {
+	unix := installScript{
+		remoteFile: remoteFile{
+			Path:   "scripts/install-chromium.sh",
+			SHA256: "97e00ce690f04de6b74090f514bea494e1c29aed5859e945f9baee7e6546d147",
+		},
+		Command: func(scriptPath, appDir string) *exec.Cmd {
+			return exec.Command("bash", scriptPath, appDir)
+		},
+	}
 	return map[string]installScript{
 		"windows": {
-			Path:   "scripts/install-chromium.ps1",
-			SHA256: "94fac75f98100e6bb0f8cf887ae242e2b88f17d6b079b6e59ef9f0ada6eb69d2",
-			Command: func(scriptPath, appDir string) *exec.Cmd {
-				return exec.Command("powershell", "-ExecutionPolicy", "Bypass", "-File", scriptPath, "-AppDir", appDir)
+			remoteFile: remoteFile{
+				Path:   "scripts/install-chromium.ps1",
+				SHA256: "94fac75f98100e6bb0f8cf887ae242e2b88f17d6b079b6e59ef9f0ada6eb69d2",
 			},
+			Command: windowsInstallCommand,
 		},
-		"darwin": {
-			Path:   "scripts/install-chromium.sh",
-			SHA256: "97e00ce690f04de6b74090f514bea494e1c29aed5859e945f9baee7e6546d147",
-			Command: func(scriptPath, appDir string) *exec.Cmd {
-				return exec.Command("bash", scriptPath, appDir)
-			},
-		},
-		"linux": {
-			Path:   "scripts/install-chromium.sh",
-			SHA256: "97e00ce690f04de6b74090f514bea494e1c29aed5859e945f9baee7e6546d147",
-			Command: func(scriptPath, appDir string) *exec.Cmd {
-				return exec.Command("bash", scriptPath, appDir)
-			},
-		},
+		"darwin": unix,
+		"linux":  unix,
 	}
 }
 
-// scriptURL 是这个平台的脚本在 GitHub 上的原始内容地址。
+// windowsInstallCommand 拼出执行 .ps1 的那条命令。
+//
+// 走 `-Command` 而不是 `-File`，只为在跑脚本之前先把 `[Console]::OutputEncoding`
+// 设成 UTF-8。Windows PowerShell 5.1 默认按**控制台代码页**（中文机器上是 GBK）编码
+// 它写出去的每一个字节，而 Go 这边按 UTF-8 读——于是脚本里那些「找不到 …」「摘要
+// 不符 …」到了界面上就是 `install-chromium: 涓枃…` 那种乱码。**失败信息是用户唯一
+// 能看懂的东西**，乱码等于没有。（2026-09-04 真机复现并逐字节比对过两种写法。）
+//
+// 编码只改在**输出这一侧**，不在 Go 这边猜编码解码：猜要先知道对面用的是哪个代码页
+// （GBK / Big5 / cp1252 各不相同，还随机器区域设置变），而脚本里既有中文也有下载来的
+// 路径，猜错的表现同样是乱码，只是换了一种。让源头直接吐 UTF-8 才是确定的。
+//
+// 脚本路径与 AppDir 都经 psQuote 进单引号：两者都可能带空格（`C:\Program Files\…`），
+// AppDir 还可能带单引号。拼错的表现不是乱码，是**脚本根本没跑起来**。
+//
+// 用 `&`（调用运算符）而不是直接写路径：带引号的字符串在 PowerShell 里默认被当成
+// 一个**字符串字面量**求值并原样打印，`&` 才是「把它当命令执行」。
+func windowsInstallCommand(scriptPath, appDir string) *exec.Cmd {
+	command := "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; & " +
+		psQuote(scriptPath) + " -AppDir " + psQuote(appDir)
+	return exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command)
+}
+
+// psQuote 把一个字符串包成 PowerShell 的**单引号**字面量。
+//
+// 单引号里 PowerShell 不做任何展开（`$` 与反引号都是普通字符），唯一需要转义的是
+// 单引号本身——写成两个。这一点很重要：Windows 的路径里全是反斜杠，双引号字面量会
+// 把 `$` 当变量、把反引号当转义符，那才是真会拼错的写法。
+func psQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
+// rawURL 是仓库里某个文件在 GitHub 上的原始内容地址。
 //
 // raw.githubusercontent.com 按 ref 取内容；ref 是 commit 时，内容不可变——这正是
 // 不用分支名的理由。
+func rawURL(path string) string {
+	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", scriptRepo, scriptRef, path)
+}
+
+// scriptURL 是这个平台的脚本在 GitHub 上的原始内容地址。
 func scriptURL(goos string) (string, error) {
 	script, ok := installScripts()[goos]
 	if !ok {
 		return "", fmt.Errorf("no chromium install script for %s", goos)
 	}
-	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", scriptRepo, scriptRef, script.Path), nil
+	return rawURL(script.Path), nil
 }
 
 // installTimeout 是整个安装的上限：下载一份 150–200MB 的浏览器再解压，慢的网络上
@@ -104,10 +165,21 @@ const installTimeout = 20 * time.Minute
 // 取到的根本不是它，那时候要在读进内存之前就停下。
 const maxScriptBytes = 1 << 20
 
-// Install 取回这个平台的安装脚本、校验、然后执行它，把浏览器装到 App 旁边。
+// Install 取回这个平台的安装脚本**与它要读的 chromium-pin.json**、逐一校验、把两者
+// 放进同一个临时目录，然后执行脚本，把浏览器装到 App 旁边。
+//
+// 两份文件必须**同一个目录**：脚本在自己所在的那个目录里找 pin 文件（ps1 走
+// `Split-Path -Parent $MyInvocation.MyCommand.Path`，sh 走 `dirname "$BASH_SOURCE"`），
+// 找不到就在第一行 throw / die。只取脚本，安装 100% 失败。
+//
+// **pin 文件和脚本一样要校验摘要。** 它是「装哪个浏览器」的唯一来源——每个平台的包
+// 地址与摘要都写在它里面。不校验它，等于让任何能改那个地址内容的人指定用户机器上装
+// 什么：脚本会按它给的 URL 下载、按它给的摘要「校验」通过，脚本里那套校验形同虚设。
+// 校验脚本却不校验 pin，等于锁了门却把钥匙挂在门上。
 //
 // 每一步的失败都带着「哪一步、为什么」返回，不吞：装不上时用户看到的应该是
-// 「摘要不符」或「连不上 GitHub」，而不是一句「安装失败」。
+// 「摘要不符」或「连不上 GitHub」，而不是一句「安装失败」。取不到 pin、pin 对不上，
+// 都在执行之前就停下，没有「没有 pin 就凑合装」这条路。
 //
 // progress 在脚本**还在跑的时候**逐行收到它的输出（下载进度、装到哪、装完的版本），
 // 不是等它退出之后一次性倒出来——整件事要几分钟，没有进度的几分钟用户会以为它死了
@@ -121,35 +193,15 @@ func Install(ctx context.Context, client *http.Client, progress func(line string
 	if !ok {
 		return fmt.Errorf("this platform (%s) has no chromium install script", runtime.GOOS)
 	}
-	url, err := scriptURL(runtime.GOOS)
-	if err != nil {
-		return err
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, installTimeout)
 	defer cancel()
 
-	body, err := fetchScript(ctx, client, url)
+	dir, scriptPath, err := stageInstallFiles(ctx, client, script, rawURL)
+	if dir != "" {
+		defer func() { _ = os.RemoveAll(dir) }()
+	}
 	if err != nil {
 		return err
-	}
-	got := sha256.Sum256(body)
-	if hex.EncodeToString(got[:]) != script.SHA256 {
-		// 拒绝执行，不是「照常执行并记一条警告」：这一步的全部意义就是不执行
-		// 没见过的东西。
-		return fmt.Errorf("the install script fetched from %s does not match the digest shipped with this app "+
-			"(want %s, got %s); refusing to run it", url, script.SHA256, hex.EncodeToString(got[:]))
-	}
-
-	dir, err := os.MkdirTemp("", "legion-install-chromium-")
-	if err != nil {
-		return fmt.Errorf("make a temporary directory for the install script: %w", err)
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-
-	scriptPath := filepath.Join(dir, filepath.Base(script.Path))
-	if err := os.WriteFile(scriptPath, body, 0o700); err != nil {
-		return fmt.Errorf("write the install script to %s: %w", scriptPath, err)
 	}
 
 	if err := runInstallScript(script.Command(scriptPath, appDir), progress); err != nil {
@@ -164,6 +216,60 @@ func Install(ctx context.Context, client *http.Client, progress func(line string
 			" it may have been installed next to the app instead of inside it (app dir: %s)", appDir)
 	}
 	return nil
+}
+
+// stageInstallFiles 建一个临时目录，把安装要用的每一份文件取回来、校验摘要、写进去，
+// 返回该目录与脚本在里面的落点。
+//
+// urlFor 把仓库内路径换成取内容的地址；正式路径上它是 rawURL，测试可以指向本地服务器。
+//
+// 目录即使在出错时也会返回（若已经建出来），好让调用方无条件清掉它。
+func stageInstallFiles(ctx context.Context, client *http.Client, script installScript, urlFor func(path string) string) (string, string, error) {
+	body, err := fetchVerified(ctx, client, urlFor(script.Path), script.SHA256, "install script")
+	if err != nil {
+		return "", "", err
+	}
+	// 脚本要读的清单，与脚本走**同一套**取回 + 校验。取不到或对不上就到此为止，不许
+	// 「没有 pin 就凑合装」：那样的失败会发生在用户机器上，且指向他的磁盘而不是这里。
+	pin := pinFile()
+	pinBody, err := fetchVerified(ctx, client, urlFor(pin.Path), pin.SHA256, filepath.Base(pin.Path))
+	if err != nil {
+		return "", "", err
+	}
+
+	dir, err := os.MkdirTemp("", "legion-install-chromium-")
+	if err != nil {
+		return "", "", fmt.Errorf("make a temporary directory for the install script: %w", err)
+	}
+
+	scriptPath := filepath.Join(dir, filepath.Base(script.Path))
+	if err := os.WriteFile(scriptPath, body, 0o700); err != nil {
+		return dir, "", fmt.Errorf("write the install script to %s: %w", scriptPath, err)
+	}
+	// **同一个目录**，不是随便哪里：两份脚本都按「自己所在的那个目录」找它。
+	pinPath := filepath.Join(dir, filepath.Base(pin.Path))
+	if err := os.WriteFile(pinPath, pinBody, 0o600); err != nil {
+		return dir, "", fmt.Errorf("write %s to %s: %w", filepath.Base(pin.Path), pinPath, err)
+	}
+
+	return dir, scriptPath, nil
+}
+
+// fetchVerified 取一份钉住的文件，并把内容与编译进二进制的摘要逐字比对。
+//
+// 不符就**拒绝**，不是「照常继续并记一条警告」：这一步的全部意义就是不执行没见过的
+// 东西。what 只用来让错误说清是哪一份文件对不上。
+func fetchVerified(ctx context.Context, client *http.Client, url, want, what string) ([]byte, error) {
+	body, err := fetchScript(ctx, client, url)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(body)
+	if got := hex.EncodeToString(sum[:]); got != want {
+		return nil, fmt.Errorf("the %s fetched from %s does not match the digest shipped with this app "+
+			"(want %s, got %s); refusing to run the install", what, url, want, got)
+	}
+	return body, nil
 }
 
 // fetchScript 取脚本内容。非 200 与超大内容都在读进内存之前就拒绝。
