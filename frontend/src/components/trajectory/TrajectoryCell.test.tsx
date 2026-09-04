@@ -101,14 +101,35 @@ describe('TrajectoryCell', () => {
     expect(screen.getByText(/is_error 字段缺失或类型不对/)).toBeInTheDocument()
   })
 
-  // user/message 的空正文当前判为坏数据（「空的用户消息不会产生一轮」，报告 §6.3
+  // user/message 的空正文仍判为坏数据（「空的用户消息不会产生一轮」，报告 §6.3
   // 自陈存疑，task-4-review.md Important-3 指出这个假设无 server 契约实锤，且与
-  // assistant/message 把空串当合法可选不对称）。这条测试不对判断本身背书，只是把
-  // *当前*行为钉住：谁要把这条对齐成 assistant 的「（无正文）」路线，必须先让这条
-  // 测试连同判断一起改掉，而不是在改别处时顺手带跑。
-  it('user/message 空正文按当前判断标为坏数据（判断存疑，见 task-4-review.md Important-3）', () => {
+  // assistant/message 把空串当合法可选不对称）。**判断没变，说法变了**：字段既在、
+  // 也是字符串，说它「缺失或类型不对」会让排查者按这句话去 server 查 content 字段，
+  // 查到的是一个好端端的空串。这条测试钉的是「坏数据的判断还在 + 文案说的是实话」；
+  // 谁要把判断本身对齐成 assistant 的「（无正文）」路线，仍然必须先改这条测试。
+  it('user/message 空正文仍判为坏数据，但文案说的是「空」而不是「缺失或类型不对」', () => {
     render(<TrajectoryCell event={ev('user/message', { content: '' })} sessionID="sess-1" />)
+    expect(screen.getByText(/content 字段是空串/)).toBeInTheDocument()
+    expect(screen.queryByText(/content 字段缺失或类型不对/)).not.toBeInTheDocument()
+  })
+
+  // 缺席与类型不对仍然是原来那句话——这条是防止上一条把两种说法合并掉。
+  it('user/message 缺 content 时仍说「缺失或类型不对」', () => {
+    render(<TrajectoryCell event={ev('user/message', {})} sessionID="sess-1" />)
     expect(screen.getByText(/content 字段缺失或类型不对/)).toBeInTheDocument()
+  })
+
+  // tool/result 的空 preview 一度渲染成纯空白（只剩 RESULT 徽章）。本分支已经为
+  // 「空正文不显示成空白」定了规矩——assistant 有「（无正文）」、tool/call 有
+  // 「（无参数）」——就不该留一处例外让人分不清「工具没输出」和「界面坏了」。
+  it('tool/result 空 preview 显示「无输出」而不是空白行', () => {
+    render(
+      <TrajectoryCell
+        event={ev('tool/result', { call_id: 'c1', preview: '', is_error: false })}
+        sessionID="sess-1"
+      />
+    )
+    expect(screen.getByText(/无输出/)).toBeInTheDocument()
   })
 
   it('turn/end 渲染成边界行并带上原因', () => {

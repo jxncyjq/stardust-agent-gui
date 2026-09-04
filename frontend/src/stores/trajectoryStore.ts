@@ -46,8 +46,14 @@ interface TrajectoryState {
 function groupByTurn(events: SessionEvent[]): TrajectoryTurnGroup[] {
   const groups = new Map<number, SessionEvent[]>()
   for (const e of events) {
-    // turn 是事件载荷的约定字段（spec §4.1：turn 每会话单调）。它缺席是数据
-    // 损坏而不是可选，但前端不该因此白屏——归到 -1 组并让它显式地显示出来。
+    // turn 是事件载荷的必给字段：server 的 eventRecorder 八个 record* 方法**全部
+    // 无条件写它**（legionAgent `internal/runtime/eventlog.go`，2026-09-04 现核），
+    // 每会话单调。所以它缺席是数据损坏，不是「可选字段没给」。
+    //
+    // 这里不引用 spec 的节号：那份 spec 在 legionAgent 仓，本仓的人翻不到，一个
+    // 找不到出处的引用比没有引用更费时间。要核就核上面那个文件。
+    //
+    // 缺席时前端仍不该白屏——归到 -1 组并让它显式地显示出来。
     const turn = typeof e.data?.turn === 'number' ? e.data.turn : -1
     const bucket = groups.get(turn)
     if (bucket) bucket.push(e)
